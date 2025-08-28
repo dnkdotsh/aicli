@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# Project-specific
+logs/
+images/
+
+# Distribution / Installation
+.eggs/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE / Editor folders
+.vscode/
+.idea/
+
+# Secrets - Although we use environment variables, this is a good safeguard
+*.env
+.env.*
