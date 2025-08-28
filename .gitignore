@@ -33,11 +33,13 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# script specifc
+# Local application logs
+# Note: The main app now logs to a central XDG directory, 
+# but this will ignore any local logs generated during development.
 logs/
 images/
-backups/
 prompts/
+backups/
 
 # Environment variables file
 # Ignore all .env files, but allow committing a template.
