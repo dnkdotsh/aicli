@@ -11,6 +11,7 @@ build/
 dist/
 *.egg-info/
 .eggs/
+package.py
 
 # Virtual Environments - A folder that houses all the dependencies for the project
 .env
