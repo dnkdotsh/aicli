@@ -1,31 +1,46 @@
-# Python
+# Byte-compiled and optimized files
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual Environments - A folder that houses all the dependencies for the project
+.env
+.venv
 env/
 venv/
-.venv/
 
-# Project-specific
+# Testing artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE and editor directories
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# script specifc
 logs/
 images/
-prompts/
-Test/
 backups/
+prompts/
 
-# Distribution / Installation
-.eggs/
-*.egg-info/
-dist/
-build/
-*.egg
+# Environment variables file
+# Ignore all .env files, but allow committing a template.
+.env*
+!/.env.example
 
-# IDE / Editor folders
-.vscode/
-.idea/
-
-# Secrets - Although we use environment variables, this is a good safeguard
-*.env
-.env.*

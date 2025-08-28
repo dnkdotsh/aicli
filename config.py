@@ -1,54 +1,30 @@
 # aicli/config.py
 
-# Unified Command-Line AI Client
-# Copyright (C) 2025 <name of author>
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <https://www.gnu.org/licenses/>.
-
 import os
+from pathlib import Path
 
 # --- Main Configuration ---
+# This is now the location for non-user-configurable constants.
+# User-facing defaults are managed in settings.py
 
-# Default engine can be 'openai' or 'gemini'
-DEFAULT_ENGINE = 'gemini'
+# Base directory for all application-generated files.
+DATA_DIR = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'aicli'
 
-# Default models for each service
-DEFAULT_OPENAI_CHAT_MODEL = "gpt-5-nano"
-DEFAULT_OPENAI_IMAGE_MODEL = "dall-e-3"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
+# --- Log and Data Directories ---
+LOG_DIRECTORY = DATA_DIR / "logs"
+IMAGE_DIRECTORY = DATA_DIR / "images"
 
-# Models for automated helper tasks (renaming, memory, etc.)
-DEFAULT_HELPER_MODEL_OPENAI = "gpt-4o-mini"
-DEFAULT_HELPER_MODEL_GEMINI = "gemini-1.5-flash-latest"
+# --- Specific File Paths ---
+IMAGE_LOG_FILE = LOG_DIRECTORY / "image_log.jsonl"
+PERSISTENT_MEMORY_FILE = LOG_DIRECTORY / "persistent_memory.txt"
+RAW_LOG_FILE = LOG_DIRECTORY / "raw.log"
 
-# Token configuration
-DEFAULT_MAX_TOKENS = 8192
-SUMMARY_MAX_TOKENS = 2048 # Max tokens for generating a session summary
+# --- Chat History Configuration ---
+# These values are related to application logic rather than user preference.
+# A "turn" consists of one user message and one assistant response.
+HISTORY_SUMMARY_THRESHOLD_TURNS = 12
+HISTORY_SUMMARY_TRIM_TURNS = 6
 
-# Chat history configuration
-HISTORY_SUMMARY_THRESHOLD_TURNS = 10
-# Number of turns (1 turn = 1 user + 1 assistant message) from the beginning of a
-# conversation to summarize when the threshold is met.
-HISTORY_SUMMARY_TRIM_TURNS = 5
+# Token configuration for internal tasks.
+SUMMARY_MAX_TOKENS = 2048
 
-
-# --- Log Configuration ---
-
-LOG_DIRECTORY = "logs"
-IMAGE_DIRECTORY = "images"
-
-# Ensure log paths are relative to the log directory
-IMAGE_LOG_FILE = os.path.join(LOG_DIRECTORY, "image_log.jsonl")
-PERSISTENT_MEMORY_FILE = os.path.join(LOG_DIRECTORY, "persistent_memory.txt") # Unified Memory
-RAW_LOG_FILE = os.path.join(LOG_DIRECTORY, "raw.log")
