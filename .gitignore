@@ -11,6 +11,9 @@ venv/
 # Project-specific
 logs/
 images/
+prompts/
+Test/
+backups/
 
 # Distribution / Installation
 .eggs/
