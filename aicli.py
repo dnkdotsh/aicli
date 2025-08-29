@@ -67,7 +67,12 @@ def main():
     exclusive_mode_group.add_argument('-b', '--both', type=str, metavar='PROMPT', help='Send a prompt to both OpenAI and Gemini.')
 
     context_group.add_argument('-p', '--prompt', type=str, help='Provide a prompt for single-shot chat or image mode.')
-    context_group.add_argument('-f', '--file', action='append', help="Attach content from files or directories (can be used multiple times).")
+    context_group.add_argument(
+        '-f', '--file',
+        nargs='+',
+        action='extend',
+        help="Attach content from files or directories. Accepts multiple paths and wildcards."
+    )
     context_group.add_argument('-x', '--exclude', action='append', help="Exclude a file or directory (can be used multiple times).")
     context_group.add_argument('--memory', action='store_true', help='Force persistent memory on for this session, overriding the default setting.')
 
