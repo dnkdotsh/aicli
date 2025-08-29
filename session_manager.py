@@ -20,11 +20,11 @@ class SessionState:
     model: str
     system_prompt: str | None
     max_tokens: int | None
+    memory_enabled: bool
     initial_image_data: list = field(default_factory=list)
     history: list = field(default_factory=list)
     debug_active: bool = False
     stream_active: bool = True
-    memory_enabled: bool = False
     session_raw_logs: list = field(default_factory=list)
 
 def _condense_chat_history(state: SessionState):
@@ -75,6 +75,11 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
         state.debug_active = not state.debug_active
         status = "ENABLED" if state.debug_active else "DISABLED"
         print(f"{utils.SYSTEM_MSG}--> Session-specific debug logging is now {status}.{utils.RESET_COLOR}")
+
+    elif command == '/memory':
+        state.memory_enabled = not state.memory_enabled
+        status = "ENABLED" if state.memory_enabled else "DISABLED"
+        print(f"{utils.SYSTEM_MSG}--> Persistent memory is now {status} for saving at the end of this session.{utils.RESET_COLOR}")
         
     elif command == '/max-tokens':
         if args and args[0].isdigit():
@@ -120,7 +125,7 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
 
     elif command == '/state':
         state_dict = asdict(state)
-        state_dict['engine'] = state.engine.name # Avoid printing the object
+        state_dict['engine'] = state.engine.name
         state_dict.pop('session_raw_logs', None)
         state_dict.pop('history', None)
         print(json.dumps(state_dict, indent=2))
@@ -132,7 +137,7 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
             print(f"{utils.SYSTEM_MSG}--> Usage: /set <setting_key> <value>{utils.RESET_COLOR}")
 
     else:
-        print(f"{utils.SYSTEM_MSG}--> Unknown command: {command}. Available: /exit, /stream, /debug, /clear, /model, /engine, /max-tokens, /history, /state, /set{utils.RESET_COLOR}")
+        print(f"{utils.SYSTEM_MSG}--> Unknown command: {command}. Available: /exit, /stream, /debug, /memory, /clear, /model, /engine, /max-tokens, /history, /state, /set{utils.RESET_COLOR}")
 
     return False
 
@@ -147,6 +152,8 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
 
     if initial_state.system_prompt: print("System prompt is active.")
     if initial_state.initial_image_data: print(f"Attached {len(initial_state.initial_image_data)} image(s) to this session.")
+    if initial_state.memory_enabled: print("Persistent memory is enabled for this session.")
+
 
     first_turn = True
     try:
@@ -193,14 +200,14 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
         print("\nSession interrupted by user.")
     finally:
         print("\nSession ended.")
-        if os.path.exists(log_filename):
+        if os.path.exists(log_filename) and initial_state.history:
             if initial_state.memory_enabled:
-                _update_persistent_memory(initial_state.engine, initial_state.model, log_filename)
+                _update_persistent_memory(initial_state.engine, initial_state.model, initial_state.history)
             else:
-                print(f"{utils.SYSTEM_MSG}--> --memory flag not used, skipping persistent memory update.{utils.RESET_COLOR}")
+                print(f"{utils.SYSTEM_MSG}--> Persistent memory not enabled, skipping update.{utils.RESET_COLOR}")
 
             if not session_name:
-                rename_session_log(initial_state.engine, log_filename)
+                rename_session_log(initial_state.engine, initial_state.history, log_filename)
 
         if initial_state.debug_active:
             debug_filename = f"debug_{os.path.splitext(log_filename_base)[0]}.jsonl"
@@ -213,40 +220,32 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
             except IOError as e:
                 print(f"\nWarning: Could not write to debug log file: {e}", file=sys.stderr)
 
-def _update_persistent_memory(engine: AIEngine, model: str, log_file: str):
-    """Summarizes the session and integrates it into the persistent memory."""
+def _update_persistent_memory(engine: AIEngine, model: str, history: list):
+    """Integrates the session history into the persistent memory file in a single step."""
     try:
-        print(f"{utils.SYSTEM_MSG}--> Summarizing session for persistent memory...{utils.RESET_COLOR}")
-        with open(log_file, 'r', encoding='utf-8') as f:
-            log_content = f.read()
-        summary_prompt = (
-            "Provide a concise, third-person summary of the key topics, facts, and outcomes from the following chat log. "
-            "Focus on information worth remembering for future sessions. "
-            f"CHAT LOG:\n---\n{log_content}\n---"
-        )
-        messages = [utils.construct_user_message(engine.name, summary_prompt, [])]
-        summary_text, _ = api_client.perform_chat_request(engine, model, messages, None, config.SUMMARY_MAX_TOKENS, stream=False)
-        if not summary_text:
-            print("--> Warning: Failed to generate session summary. Memory not updated.", file=sys.stderr)
-            return
-
-        print(f"{utils.SYSTEM_MSG}--> Integrating summary into persistent memory...{utils.RESET_COLOR}")
+        print(f"{utils.SYSTEM_MSG}--> Integrating session into persistent memory...{utils.RESET_COLOR}")
+        session_content = "\n".join([f"{msg.get('role', 'unknown')}: {utils.extract_text_from_message(msg)}" for msg in history])
+        
         existing_ltm = ""
         if os.path.exists(config.PERSISTENT_MEMORY_FILE):
             with open(config.PERSISTENT_MEMORY_FILE, 'r', encoding='utf-8') as f:
                 existing_ltm = f.read()
+
         integration_prompt = (
-            "You are a memory consolidation agent. Integrate the new session summary into the existing persistent memory. "
-            "Combine related topics, update existing facts, and discard trivial data to keep the memory concise and relevant. "
-            "The goal is a dense, factual summary of all interactions.\n\n"
+            "You are a memory consolidation agent. Integrate the key facts, topics, and outcomes from the new chat session "
+            "into the existing persistent memory. Combine related topics, update existing facts, and discard trivial data to "
+            "keep the memory concise and relevant. The goal is a dense, factual summary of all interactions.\n\n"
             f"--- EXISTING PERSISTENT MEMORY ---\n{existing_ltm}\n\n"
-            f"--- NEW SESSION SUMMARY TO INTEGRATE ---\n{summary_text}\n\n"
+            f"--- NEW CHAT SESSION TO INTEGRATE ---\n{session_content}\n\n"
             "--- UPDATED PERSISTENT MEMORY ---"
         )
+        
         helper_model_key = 'helper_model_openai' if engine.name == 'openai' else 'helper_model_gemini'
         task_model = app_settings.settings[helper_model_key]
         messages = [utils.construct_user_message(engine.name, integration_prompt, [])]
-        updated_ltm, _ = api_client.perform_chat_request(engine, task_model, messages, None, None, stream=False)
+        
+        updated_ltm, _ = api_client.perform_chat_request(engine, task_model, messages, None, config.SUMMARY_MAX_TOKENS, stream=False)
+        
         if updated_ltm:
             with open(config.PERSISTENT_MEMORY_FILE, 'w', encoding='utf-8') as f:
                 f.write(updated_ltm.strip())
@@ -256,24 +255,28 @@ def _update_persistent_memory(engine: AIEngine, model: str, log_file: str):
     except Exception as e:
         print(f"--> Error during memory update: {e}", file=sys.stderr)
 
-def rename_session_log(engine: AIEngine, log_file: str):
-    """Generates a descriptive name for the chat log using an AI model and renames the file."""
+def rename_session_log(engine: AIEngine, history: list, log_file: str):
+    """Generates a descriptive name for the chat log from its history and renames the file."""
     print(f"{utils.SYSTEM_MSG}--> Generating smart name for session log...{utils.RESET_COLOR}")
     try:
-        with open(log_file, 'r', encoding='utf-8') as f:
-            log_content = "".join(f.readlines()[:50])
+        # Use the first 20 turns (40 messages) for context to avoid large prompts
+        history_excerpt = history[:40]
+        log_content = "\n".join([f"{msg.get('role', 'unknown')}: {utils.extract_text_from_message(msg)}" for msg in history_excerpt])
+
         prompt = (
             "Based on the following chat log, generate a concise, descriptive, filename-safe title. "
             "Use snake_case. The title should be 3-5 words. "
             "Do not include any file extension like '.jsonl'. "
             "Example response: 'python_script_debugging_and_refactoring'\n\n"
-            f"CHAT LOG:\n---\n{log_content}\n---"
+            f"CHAT LOG EXCERPT:\n---\n{log_content}\n---"
         )
         helper_model_key = 'helper_model_openai' if engine.name == 'openai' else 'helper_model_gemini'
         task_model = app_settings.settings[helper_model_key]
         messages = [utils.construct_user_message(engine.name, prompt, [])]
-        new_name, _ = api_client.perform_chat_request(engine, task_model, messages, None, 50, stream=False)
+        
+        new_name, _ = api_client.perform_chat_request(engine, task_model, messages, None, 1024, stream=False)
         sanitized_name = utils.sanitize_filename(new_name.strip())
+        
         if sanitized_name:
             new_filename_base = f"{sanitized_name}.jsonl"
             new_filepath = os.path.join(config.LOG_DIRECTORY, new_filename_base)
