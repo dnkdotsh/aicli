@@ -22,6 +22,7 @@ DEFAULT_SETTINGS = {
     'helper_model_openai': 'gpt-4o-mini',
     'helper_model_gemini': 'gemini-1.5-flash-latest',
     'memory_enabled': False,
+    'api_timeout': 180,
 }
 
 def _get_settings() -> dict:
@@ -50,17 +51,23 @@ def _get_settings() -> dict:
 
 def save_setting(key: str, value) -> bool:
     """Saves a single setting to the JSON file."""
-    # Convert value for specific boolean keys
+    if key not in DEFAULT_SETTINGS:
+        print(f"--> Error: '{key}' is not a valid setting.", file=sys.stderr)
+        return False
+
+    # Convert value for specific types
     if key in ['stream', 'memory_enabled']:
         if str(value).lower() in ['true', 'on', 'yes', '1']:
             value = True
         elif str(value).lower() in ['false', 'off', 'no', '0']:
             value = False
+    elif key in ['default_max_tokens', 'api_timeout']:
+        try:
+            value = int(value)
+        except ValueError:
+            print(f"--> Error: '{key}' requires an integer value.", file=sys.stderr)
+            return False
 
-    if key not in DEFAULT_SETTINGS:
-        print(f"--> Error: '{key}' is not a valid setting.", file=sys.stderr)
-        return False
-        
     current_settings = _get_settings()
     current_settings[key] = value
     try:

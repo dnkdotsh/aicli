@@ -16,6 +16,7 @@ import utils
 import config
 from settings import settings
 from engine import get_engine
+from logger import log
 
 class CustomHelpFormatter(argparse.RawTextHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
     """Custom formatter for argparse help messages."""
@@ -40,7 +41,7 @@ def main():
             model = settings['default_openai_chat_model'] if settings['default_engine'] == 'openai' else settings['default_gemini_model']
             handlers.handle_chat(engine_instance, model, system_prompt, None, [], None, settings.get('default_max_tokens'), settings.get('stream'), settings['memory_enabled'], False)
         except api_client.MissingApiKeyError as e:
-            print(e, file=sys.stderr)
+            log.error(e)
             sys.exit(1)
         return
 
@@ -121,7 +122,7 @@ def main():
             handlers.handle_image_generation(api_key, engine_instance, image_prompt)
 
     except api_client.MissingApiKeyError as e:
-        print(e, file=sys.stderr)
+        log.error(e)
         sys.exit(1)
 
 if __name__ == "__main__":

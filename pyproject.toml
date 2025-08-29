@@ -1,0 +1,20 @@
+# pyproject.toml
+
+[project]
+name = "aicli"
+version = "1.0.0"
+description = "A unified command-line client for OpenAI and Google Gemini."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GNU General Public License v3.0" }
+dependencies = [
+    "requests",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[project.scripts]
+aicli = "aicli.aicli:main"

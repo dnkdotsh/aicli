@@ -12,6 +12,7 @@ import utils
 import handlers
 import settings as app_settings
 from engine import AIEngine
+from logger import log
 
 @dataclass
 class SessionState:
@@ -50,7 +51,7 @@ def _condense_chat_history(state: SessionState):
         system_prompt=None, max_tokens=config.SUMMARY_MAX_TOKENS, stream=False
     )
     if not summary_text:
-        print(f"{utils.SYSTEM_MSG}--> Warning: History summarization failed. Proceeding with full history.{utils.RESET_COLOR}", file=sys.stderr)
+        log.warning("History summarization failed. Proceeding with full history.")
         return
 
     summary_message = utils.construct_user_message(state.engine.name, f"[PREVIOUSLY DISCUSSED]:\n{summary_text.strip()}", [])
@@ -194,7 +195,7 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
                 with open(log_filename, 'a', encoding='utf-8') as f:
                     f.write(json.dumps(log_entry) + '\n')
             except IOError as e:
-                print(f"\nWarning: Could not write to session log file: {e}", file=sys.stderr)
+                log.warning("Could not write to session log file: %s", e)
             first_turn = False
     except (KeyboardInterrupt, EOFError):
         print("\nSession interrupted by user.")
@@ -218,7 +219,7 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
                     for entry in initial_state.session_raw_logs:
                         f.write(json.dumps(entry) + '\n')
             except IOError as e:
-                print(f"\nWarning: Could not write to debug log file: {e}", file=sys.stderr)
+                log.warning("Could not write to debug log file: %s", e)
 
 def _update_persistent_memory(engine: AIEngine, model: str, history: list):
     """Integrates the session history into the persistent memory file in a single step."""
@@ -251,9 +252,9 @@ def _update_persistent_memory(engine: AIEngine, model: str, history: list):
                 f.write(updated_ltm.strip())
             print(f"{utils.SYSTEM_MSG}--> Persistent memory updated successfully.{utils.RESET_COLOR}")
         else:
-            print("--> Warning: Failed to update persistent memory.", file=sys.stderr)
+            log.warning("Failed to update persistent memory.")
     except Exception as e:
-        print(f"--> Error during memory update: {e}", file=sys.stderr)
+        log.error("Error during memory update: %s", e)
 
 def rename_session_log(engine: AIEngine, history: list, log_file: str):
     """Generates a descriptive name for the chat log from its history and renames the file."""
@@ -288,6 +289,6 @@ def rename_session_log(engine: AIEngine, history: list, log_file: str):
             os.rename(log_file, new_filepath)
             print(f"{utils.SYSTEM_MSG}--> Session log saved as: {new_filepath}{utils.RESET_COLOR}")
         else:
-            print(f"--> Warning: Could not generate a valid name. Log remains as: {log_file}", file=sys.stderr)
+            log.warning("Could not generate a valid name. Log remains as: %s", log_file)
     except (IOError, OSError, Exception) as e:
-        print(f"--> Warning: Could not rename session log ({e}). Log remains as: {log_file}", file=sys.stderr)
+        log.warning("Could not rename session log (%s). Log remains as: %s", e, log_file)

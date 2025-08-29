@@ -11,6 +11,7 @@ import requests
 from pathlib import Path
 
 import config
+from logger import log
 
 # ANSI color codes for UI theming
 USER_PROMPT = '\033[96m'      # Bright Cyan
@@ -100,7 +101,7 @@ def ensure_dir_exists(directory: Path):
     try:
         directory.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        print(f"Error: Could not create directory '{directory}': {e}", file=sys.stderr)
+        log.critical("Could not create directory '%s': %s", directory, e)
         sys.exit(1)
 
 def sanitize_filename(name: str) -> str:
@@ -131,14 +132,14 @@ def _process_file_content(filepath: str, file_content: bytes, text_prompts: list
     if mime_type and mime_type.startswith('image/'):
         encoded_image = base64.b64encode(file_content).decode('utf-8')
         image_data.append({"mime_type": mime_type, "data": encoded_image})
-        print(f"Attached image: {filepath}", file=sys.stderr)
+        log.info("Attached image: %s", filepath)
     else:
         try:
             text_content = file_content.decode('utf-8')
             filename = os.path.basename(filepath)
             text_prompts.append(f"--- START FILE: {filename} ---\n{text_content}\n--- END FILE: {filename} ---")
         except UnicodeDecodeError:
-            print(f"Warning: Could not decode file {filepath} as UTF-8 text. Skipping.", file=sys.stderr)
+            log.warning("Could not decode file %s as UTF-8 text. Skipping.", filepath)
 
 def _process_directory(path: str, exclude_abs: set, exclude_base: set, text_prompts: list, image_data: list):
     """Recursively processes files in a directory."""
@@ -152,7 +153,7 @@ def _process_directory(path: str, exclude_abs: set, exclude_base: set, text_prom
                 with open(full_path, 'rb') as f:
                     _process_file_content(full_path, f.read(), text_prompts, image_data)
             except IOError as e:
-                print(f"Warning: Could not read file {full_path}: {e}", file=sys.stderr)
+                log.warning("Could not read file %s: %s", full_path, e)
 
 def _process_zipfile(path: str, exclude_base: set, text_prompts: list, image_data: list):
     """Processes files within a zip archive."""
@@ -164,7 +165,7 @@ def _process_zipfile(path: str, exclude_base: set, text_prompts: list, image_dat
                 with zip_ref.open(filename) as zf:
                     _process_file_content(filename, zf.read(), text_prompts, image_data)
     except (zipfile.BadZipFile, IOError) as e:
-        print(f"Warning: Could not process zip file {path}: {e}", file=sys.stderr)
+        log.warning("Could not process zip file %s: %s", path, e)
 
 def process_files(file_paths: list, use_memory: bool, exclude_paths: list | None) -> tuple[str, list]:
     """Processes files, memories, and archives to build the system prompt and image data."""
@@ -178,11 +179,11 @@ def process_files(file_paths: list, use_memory: bool, exclude_paths: list | None
             if content:
                 text_prompts.append(f"--- MEMORY ---\n{content}\n---")
         except IOError as e:
-            print(f"Warning: Could not read {config.PERSISTENT_MEMORY_FILE}: {e}", file=sys.stderr)
+            log.warning("Could not read %s: %s", config.PERSISTENT_MEMORY_FILE, e)
     for path in file_paths or []:
         abs_path = os.path.abspath(path)
         if abs_path in exclude_abs or os.path.basename(abs_path) in exclude_base:
-            print(f"Excluding: {path}", file=sys.stderr)
+            log.info("Excluding: %s", path)
             continue
         if os.path.isdir(path):
             _process_directory(path, exclude_abs, exclude_base, text_prompts, image_data)
@@ -194,7 +195,7 @@ def process_files(file_paths: list, use_memory: bool, exclude_paths: list | None
                     with open(path, 'rb') as f:
                         _process_file_content(path, f.read(), text_prompts, image_data)
                 except IOError as e:
-                    print(f"Warning: Could not read file {path}: {e}", file=sys.stderr)
+                    log.warning("Could not read file %s: %s", path, e)
     system_prompt = "\n\n".join(text_prompts) if text_prompts else None
     return system_prompt, image_data
 

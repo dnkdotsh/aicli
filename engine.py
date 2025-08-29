@@ -7,6 +7,8 @@ from typing import Dict, Any, List, Tuple
 
 import config
 import utils
+from logger import log
+from settings import settings
 
 class AIEngine(abc.ABC):
     """Abstract base class for an AI engine provider."""
@@ -79,7 +81,7 @@ class OpenAIEngine(AIEngine):
         try:
             url = "https://api.openai.com/v1/models"
             headers = {"Authorization": f"Bearer {self.api_key}"}
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=settings['api_timeout'])
             response.raise_for_status()
             model_list = response.json().get('data', [])
             model_ids = [m['id'] for m in model_list]
@@ -91,7 +93,7 @@ class OpenAIEngine(AIEngine):
                 image_models = [mid for mid in model_ids if mid.startswith('dall-e') or 'image' in mid]
                 return sorted(image_models)
         except requests.exceptions.RequestException as e:
-            print(f"\nWarning: Could not fetch OpenAI model list ({e}).", file=sys.stderr)
+            log.warning("Could not fetch OpenAI model list (%s).", e)
         return []
 
 
@@ -116,23 +118,23 @@ class GeminiEngine(AIEngine):
         return payload
 
     def parse_chat_response(self, response_data: Dict[str, Any]) -> str:
+        """Safely extracts text from a Gemini API response."""
         try:
-            if 'candidates' in response_data:
-                return response_data['candidates'][0]['content']['parts'][0]['text']
+            return response_data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
         except (KeyError, IndexError):
             finish_reason = response_data.get('candidates', [{}])[0].get('finishReason', 'UNKNOWN')
-            print(f"Warning: Could not extract Gemini response part. Finish reason: {finish_reason}", file=sys.stderr)
+            log.warning("Could not extract Gemini response part. Finish reason: %s", finish_reason)
         return ""
 
     def fetch_available_models(self, task: str) -> List[str]:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models?key={self.api_key}"
-            response = requests.get(url)
+            response = requests.get(url, timeout=settings['api_timeout'])
             response.raise_for_status()
             model_list = response.json().get('models', [])
             return sorted([m['name'].replace('models/', '') for m in model_list if 'generateContent' in m.get('supportedGenerationMethods', [])])
         except requests.exceptions.RequestException as e:
-            print(f"\nWarning: Could not fetch Gemini model list ({e}).", file=sys.stderr)
+            log.warning("Could not fetch Gemini model list (%s).", e)
         return []
 
 def get_engine(engine_name: str, api_key: str) -> AIEngine:
