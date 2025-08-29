@@ -1,21 +1,5 @@
 # aicli/engine.py
 
-# Unified Command-Line AI Client
-# Copyright (C) 2025 <name of author>
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <https://www.gnu.org/licenses/>.
-
 import abc
 import requests
 import sys
@@ -78,11 +62,12 @@ class OpenAIEngine(AIEngine):
         }
 
         if max_tokens:
-            # Newer OpenAI models use 'max_completion_tokens'
-            if 'o' in model or 'mini' in model:
-                payload['max_completion_tokens'] = max_tokens
-            else:
+            # Legacy models ('gpt-4' but not 'gpt-4o', 'gpt-3.5-turbo') use 'max_tokens'.
+            # Newer and future models default to 'max_completion_tokens' for better compatibility.
+            if model.startswith('gpt-3.5-turbo') or (model.startswith('gpt-4') and not model.startswith('gpt-4o')):
                 payload['max_tokens'] = max_tokens
+            else:
+                payload['max_completion_tokens'] = max_tokens
         return payload
 
     def parse_chat_response(self, response_data: Dict[str, Any]) -> str:

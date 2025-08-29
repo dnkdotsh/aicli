@@ -1,21 +1,5 @@
 # aicli/handlers.py
 
-# Unified Command-Line AI Client
-# Copyright (C) 2025 <name of author>
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <https://www.gnu.org/licenses/>.
-
 import os
 import sys
 import json
@@ -64,16 +48,16 @@ def select_model(engine: AIEngine, task: str) -> str:
     print(f"Invalid selection. Using default: {default_model}")
     return default_model
 
-def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt: str, image_data: list, session_name: str, max_tokens: int, stream: bool, memory_enabled: bool):
+def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt: str, image_data: list, session_name: str, max_tokens: int, stream: bool, memory_enabled: bool, debug_enabled: bool):
     """Handles both single-shot and interactive chat sessions."""
     if initial_prompt:
         # Handle single-shot chat
         messages_or_contents = [utils.construct_user_message(engine.name, initial_prompt, image_data)]
         if stream:
-             print("Assistant: ", end='', flush=True)
+             print(f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}", end='', flush=True)
         response, token_dict = api_client.perform_chat_request(engine, model, messages_or_contents, system_prompt, max_tokens, stream)
         if not stream:
-            print(f"Assistant: {response}", end='')
+            print(f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}{response}", end='')
         print(utils.format_token_string(token_dict))
     else:
         # Delegate to the session manager for interactive chat
@@ -83,33 +67,35 @@ def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt
             system_prompt=system_prompt,
             initial_image_data=image_data,
             stream_active=stream,
-            memory_enabled=memory_enabled
+            memory_enabled=memory_enabled,
+            debug_active=debug_enabled,
+            max_tokens=max_tokens
         )
-        perform_interactive_chat(initial_state, session_name, max_tokens)
+        perform_interactive_chat(initial_state, session_name)
 
 def handle_both_engines(system_prompt: str, prompt: str, image_data: list, max_tokens: int, stream: bool):
     """Sends a single-shot prompt to both OpenAI and Gemini and prints the results."""
     # --- OpenAI ---
-    print("--- OpenAI Response ---")
+    print(f"{utils.SYSTEM_MSG}--- OpenAI Response ---{utils.RESET_COLOR}")
     openai_key = api_client.check_api_keys('openai')
     openai_engine = get_engine('openai', openai_key)
     openai_model = select_model(openai_engine, 'chat')
     openai_messages = [utils.construct_user_message('openai', prompt, image_data)]
-    if stream: print("Assistant: ", end='', flush=True)
+    if stream: print(f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}", end='', flush=True)
     openai_response, openai_tokens = api_client.perform_chat_request(openai_engine, openai_model, openai_messages, system_prompt, max_tokens, stream)
-    if not stream: print(f"Assistant: {openai_response}", end='')
+    if not stream: print(f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}{openai_response}", end='')
     print(utils.format_token_string(openai_tokens))
     print("\n" + "="*50 + "\n")
 
     # --- Gemini ---
-    print("--- Gemini Response ---")
+    print(f"{utils.SYSTEM_MSG}--- Gemini Response ---{utils.RESET_COLOR}")
     gemini_key = api_client.check_api_keys('gemini')
     gemini_engine = get_engine('gemini', gemini_key)
     gemini_model = select_model(gemini_engine, 'chat')
     gemini_messages = [utils.construct_user_message('gemini', prompt, image_data)]
-    if stream: print("Assistant: ", end='', flush=True)
+    if stream: print(f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}", end='', flush=True)
     gemini_response, gemini_tokens = api_client.perform_chat_request(gemini_engine, gemini_model, gemini_messages, system_prompt, max_tokens, stream)
-    if not stream: print(f"Assistant: {gemini_response}", end='')
+    if not stream: print(f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}{gemini_response}", end='')
     print(utils.format_token_string(gemini_tokens))
     print("\n" + "="*50 + "\n")
 
@@ -169,4 +155,3 @@ def handle_image_generation(api_key: str, engine: AIEngine, prompt: str):
             print("Error: API response did not contain image data in a recognized format.", file=sys.stderr)
     else:
         print("Image generation failed.", file=sys.stderr)
-

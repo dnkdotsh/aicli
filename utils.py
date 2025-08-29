@@ -1,21 +1,5 @@
 # aicli/utils.py
 
-# Unified Command-Line AI Client
-# Copyright (C) 2025 <name of author>
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <https://www.gnu.org/licenses/>.
-
 import os
 import sys
 import base64
@@ -27,6 +11,12 @@ import requests
 from pathlib import Path
 
 import config
+
+# ANSI color codes for UI theming
+USER_PROMPT = '\033[96m'      # Bright Cyan
+ASSISTANT_PROMPT = '\033[93m' # Bright Yellow
+SYSTEM_MSG = '\033[90m'      # Bright Black (Gray)
+RESET_COLOR = '\033[0m'      # Reset
 
 def format_token_string(token_dict: dict) -> str:
     """Formats the token dictionary into a consistent string for display."""
@@ -65,9 +55,9 @@ def process_stream(engine_name: str, response: requests.Response) -> tuple[str, 
             except (json.JSONDecodeError, KeyError, IndexError):
                 continue
     except KeyboardInterrupt:
-        print("\n--> Stream cancelled by user.", file=sys.stderr)
+        print(f"\n{SYSTEM_MSG}--> Stream cancelled by user.{RESET_COLOR}", file=sys.stderr)
     except requests.exceptions.ChunkedEncodingError:
-        print("\n--> Warning: Stream connection interrupted.", file=sys.stderr)
+        print(f"\n{SYSTEM_MSG}--> Warning: Stream connection interrupted.{RESET_COLOR}", file=sys.stderr)
     print() # Ensure there's a newline after streaming finishes or is cancelled.
     return full_text, tokens
 
@@ -226,4 +216,3 @@ def parse_token_counts(engine: str, response_data: dict | None) -> tuple[int, in
         reasoning_tokens = usage.get('thoughtsTokenCount', 0)
         total_tokens = usage.get('totalTokenCount', 0)
     return prompt_tokens, completion_tokens, reasoning_tokens, total_tokens
-
