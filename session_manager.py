@@ -1,10 +1,29 @@
 # aicli/session_manager.py
+# aicli: A command-line interface for interacting with AI models.
+# Copyright (C) 2025 Dank A. Saurus
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 
 import os
 import sys
 import json
 import datetime
 from dataclasses import dataclass, field, asdict
+from prompt_toolkit import prompt
+from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.formatted_text import ANSI
 
 import config
 import api_client
@@ -13,6 +32,7 @@ import handlers
 import settings as app_settings
 from engine import AIEngine
 from logger import log
+from prompts import HISTORY_SUMMARY_PROMPT, MEMORY_INTEGRATION_PROMPT, LOG_RENAMING_PROMPT
 
 @dataclass
 class SessionState:
@@ -36,11 +56,7 @@ def _condense_chat_history(state: SessionState):
     remaining_history = state.history[num_messages_to_trim:]
 
     log_content = "\n".join([f"{msg.get('role', 'unknown')}: {utils.extract_text_from_message(msg)}" for msg in turns_to_summarize])
-    summary_prompt = (
-        "Concisely summarize the key facts and takeaways from the following conversation excerpt in the third person. "
-        "This summary will be used as context for the rest of the conversation.\n\n"
-        f"--- EXCERPT ---\n{log_content}\n---"
-    )
+    summary_prompt = HISTORY_SUMMARY_PROMPT.format(log_content=log_content)
 
     helper_model_key = 'helper_model_openai' if state.engine.name == 'openai' else 'helper_model_gemini'
     task_model = app_settings.settings[helper_model_key]
@@ -66,6 +82,9 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
 
     if command == '/exit':
         return True
+    
+    elif command == '/help':
+        utils.display_help('chat')
 
     elif command == '/stream':
         state.stream_active = not state.stream_active
@@ -90,7 +109,7 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
             print(f"{utils.SYSTEM_MSG}--> Usage: /max-tokens <number>{utils.RESET_COLOR}")
 
     elif command == '/clear':
-        confirm = input("This will clear all conversation history. Type `proceed` to confirm: ")
+        confirm = prompt("This will clear all conversation history. Type `proceed` to confirm: ")
         if confirm.lower() == 'proceed':
             state.history.clear()
             print(f"{utils.SYSTEM_MSG}--> Conversation history has been cleared.{utils.RESET_COLOR}")
@@ -138,7 +157,7 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
             print(f"{utils.SYSTEM_MSG}--> Usage: /set <setting_key> <value>{utils.RESET_COLOR}")
 
     else:
-        print(f"{utils.SYSTEM_MSG}--> Unknown command: {command}. Available: /exit, /stream, /debug, /memory, /clear, /model, /engine, /max-tokens, /history, /state, /set{utils.RESET_COLOR}")
+        print(f"{utils.SYSTEM_MSG}--> Unknown command: {command}. Type /help for a list of commands.{utils.RESET_COLOR}")
 
     return False
 
@@ -148,21 +167,30 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
     log_filename = os.path.join(config.LOG_DIRECTORY, f"{log_filename_base}.jsonl")
 
     print(f"Starting interactive chat with {initial_state.engine.name.capitalize()} ({initial_state.model}).")
-    print("Type '/exit' or press Ctrl+C to end. Use '/set <key> <value>' to change default settings.")
+    print("Type '/help' for commands or '/exit' to end.")
     print(f"Session log will be saved to: {log_filename}")
 
     if initial_state.system_prompt: print("System prompt is active.")
     if initial_state.initial_image_data: print(f"Attached {len(initial_state.initial_image_data)} image(s) to this session.")
     if initial_state.memory_enabled: print("Persistent memory is enabled for this session.")
 
-
+    cli_history = InMemoryHistory()
     first_turn = True
     try:
         while True:
-            user_input = input(f"\n{utils.USER_PROMPT}You: {utils.RESET_COLOR}")
-            if not user_input.strip(): continue
+            prompt_message = f"\n{utils.USER_PROMPT}You: {utils.RESET_COLOR}"
+            user_input = prompt(ANSI(prompt_message), history=cli_history)
+
+            if not user_input.strip():
+                sys.stdout.write('\x1b[1A') 
+                sys.stdout.write('\x1b[2K') 
+                sys.stdout.flush()
+                continue
 
             if user_input.startswith('/'):
+                sys.stdout.write('\x1b[1A')
+                sys.stdout.write('\x1b[2K')
+                sys.stdout.flush()
                 if _handle_slash_command(user_input, initial_state):
                     break
                 continue
@@ -232,13 +260,9 @@ def _update_persistent_memory(engine: AIEngine, model: str, history: list):
             with open(config.PERSISTENT_MEMORY_FILE, 'r', encoding='utf-8') as f:
                 existing_ltm = f.read()
 
-        integration_prompt = (
-            "You are a memory consolidation agent. Integrate the key facts, topics, and outcomes from the new chat session "
-            "into the existing persistent memory. Combine related topics, update existing facts, and discard trivial data to "
-            "keep the memory concise and relevant. The goal is a dense, factual summary of all interactions.\n\n"
-            f"--- EXISTING PERSISTENT MEMORY ---\n{existing_ltm}\n\n"
-            f"--- NEW CHAT SESSION TO INTEGRATE ---\n{session_content}\n\n"
-            "--- UPDATED PERSISTENT MEMORY ---"
+        integration_prompt = MEMORY_INTEGRATION_PROMPT.format(
+            existing_ltm=existing_ltm,
+            session_content=session_content
         )
         
         helper_model_key = 'helper_model_openai' if engine.name == 'openai' else 'helper_model_gemini'
@@ -260,17 +284,11 @@ def rename_session_log(engine: AIEngine, history: list, log_file: str):
     """Generates a descriptive name for the chat log from its history and renames the file."""
     print(f"{utils.SYSTEM_MSG}--> Generating smart name for session log...{utils.RESET_COLOR}")
     try:
-        # Use the first 20 turns (40 messages) for context to avoid large prompts
         history_excerpt = history[:40]
         log_content = "\n".join([f"{msg.get('role', 'unknown')}: {utils.extract_text_from_message(msg)}" for msg in history_excerpt])
 
-        prompt = (
-            "Based on the following chat log, generate a concise, descriptive, filename-safe title. "
-            "Use snake_case. The title should be 3-5 words. "
-            "Do not include any file extension like '.jsonl'. "
-            "Example response: 'python_script_debugging_and_refactoring'\n\n"
-            f"CHAT LOG EXCERPT:\n---\n{log_content}\n---"
-        )
+        prompt = LOG_RENAMING_PROMPT.format(log_content=log_content)
+        
         helper_model_key = 'helper_model_openai' if engine.name == 'openai' else 'helper_model_gemini'
         task_model = app_settings.settings[helper_model_key]
         messages = [utils.construct_user_message(engine.name, prompt, [])]

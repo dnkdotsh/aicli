@@ -1,4 +1,20 @@
 #!/usr/bin/env python3
+# aicli: A command-line interface for interacting with AI models.
+# Copyright (C) 2025 Dank A. Saurus
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 # -*- coding: utf-8 -*-
 
 """
@@ -64,15 +80,11 @@ def main():
 
     exclusive_mode_group.add_argument('-c', '--chat', action='store_true', help='Activate chat mode for text generation.')
     exclusive_mode_group.add_argument('-i', '--image', action='store_true', help='Activate image generation mode (OpenAI only).')
-    exclusive_mode_group.add_argument('-b', '--both', type=str, metavar='PROMPT', help='Send a prompt to both OpenAI and Gemini.')
+    exclusive_mode_group.add_argument('-b', '--both', nargs='?', const='', type=str, metavar='PROMPT', 
+                                    help='Activate interactive multi-chat mode with both OpenAI and Gemini.\nOptionally provide an initial prompt.')
 
     context_group.add_argument('-p', '--prompt', type=str, help='Provide a prompt for single-shot chat or image mode.')
-    context_group.add_argument(
-        '-f', '--file',
-        nargs='+',
-        action='extend',
-        help="Attach content from files or directories. Accepts multiple paths and wildcards."
-    )
+    context_group.add_argument('-f', '--file', action='append', help="Attach content from files or directories (can be used multiple times).")
     context_group.add_argument('-x', '--exclude', action='append', help="Exclude a file or directory (can be used multiple times).")
     context_group.add_argument('--memory', action='store_true', help='Force persistent memory on for this session, overriding the default setting.')
 
@@ -85,8 +97,11 @@ def main():
     parser.set_defaults(stream=settings['stream'])
     args = parser.parse_args()
 
-    prompt = args.both or args.prompt
-    if not sys.stdin.isatty() and not prompt:
+    prompt = args.prompt
+    if args.both is not None and args.both != '':
+        prompt = args.both
+    
+    if not sys.stdin.isatty() and not prompt and args.both is None:
         prompt = sys.stdin.read().strip()
     
     if prompt is not None and not prompt.strip():
@@ -97,14 +112,15 @@ def main():
             if not os.path.exists(path):
                 parser.error(f"The file or directory '{path}' does not exist.")
 
-    if args.both and args.prompt:
-        parser.error("Provide a prompt via --both \"PROMPT\" or --prompt \"PROMPT\", but not both.")
-    if args.both and args.session_name:
-        parser.error("--session-name cannot be used with --both mode.")
+    if args.both is not None and args.prompt:
+        parser.error("Provide an initial prompt via --both \"PROMPT\" or --prompt \"PROMPT\", but not both.")
     if args.image and args.engine != 'openai':
         parser.error("--image mode is only supported by the 'openai' engine.")
 
-    if not args.chat and not args.image and not args.both:
+    # Default to chat mode if no other mode is specified but other arguments are present
+    if not args.image and args.both is None and (args.prompt or args.file or args.memory or args.session_name):
+        args.chat = True
+    elif not args.chat and not args.image and args.both is None:
         args.chat = True
 
     # Determine if memory should be active for this session
@@ -112,8 +128,8 @@ def main():
     system_prompt, image_data = utils.process_files(args.file, memory_enabled_for_session, args.exclude)
 
     try:
-        if args.both:
-            handlers.handle_both_engines(system_prompt, args.both, image_data, args.max_tokens, args.stream)
+        if args.both is not None:
+            handlers.handle_multichat_session(prompt, system_prompt, image_data, args.session_name, args.max_tokens, args.debug)
         elif args.chat:
             api_key = api_client.check_api_keys(args.engine)
             engine_instance = get_engine(args.engine, api_key)

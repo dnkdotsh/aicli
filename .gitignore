@@ -47,3 +47,6 @@ backups/
 .env*
 !/.env.example
 
+# misc project specific
+gpl.txt
+gpl.sh

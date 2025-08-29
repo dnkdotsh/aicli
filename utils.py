@@ -1,4 +1,20 @@
 # aicli/utils.py
+# aicli: A command-line interface for interacting with AI models.
+# Copyright (C) 2025 Dank A. Saurus
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 
 import os
 import sys
@@ -17,7 +33,30 @@ from logger import log
 USER_PROMPT = '\033[96m'      # Bright Cyan
 ASSISTANT_PROMPT = '\033[93m' # Bright Yellow
 SYSTEM_MSG = '\033[90m'      # Bright Black (Gray)
+DIRECTOR_PROMPT = '\033[95m'  # Bright Magenta
 RESET_COLOR = '\033[0m'      # Reset
+
+def display_help(mode: str = 'chat'):
+    """Displays a comprehensive help menu for interactive modes."""
+    print(f"{SYSTEM_MSG}--- Help Menu ---")
+    print("/help              Show this help menu.")
+    print("/exit              End the current session.")
+    print("/clear             Clear the conversation history for this session.")
+    print("/stream            Toggle response streaming on/off.")
+    print("/debug             Toggle session-specific debug logging on/off.")
+    print("/memory            Toggle persistent memory on/off for session end.")
+    print("/model [name]      Change the model (prompts for selection if no name is given).")
+    print("/engine [name]     Switch the AI engine (e.g., to 'openai' or 'gemini').")
+    print("/max-tokens [num]  Set the max tokens for responses in this session.")
+    print("/history           Show the raw conversation history as JSON.")
+    print("/state             Show the current session state.")
+    print("/set <key> <val>   Change and save a default setting (e.g., /set default_engine openai).")
+    if mode == 'multichat':
+        print("\n--- Multi-Chat Only ---")
+        print("/ai <eng> [prompt] Send a prompt to a specific engine (eng: gpt, gem, openai, etc.).")
+        print("                   If no prompt is given, the AI will be asked to continue.")
+    print(f"-------------------{RESET_COLOR}")
+
 
 def format_token_string(token_dict: dict) -> str:
     """Formats the token dictionary into a consistent string for display."""
@@ -29,7 +68,7 @@ def format_token_string(token_dict: dict) -> str:
     t = token_dict.get('total', 0)
     return f" [{p}/{c}/{r}/{t}]"
 
-def process_stream(engine_name: str, response: requests.Response) -> tuple[str, dict]:
+def process_stream(engine_name: str, response: requests.Response, print_stream: bool = True) -> tuple[str, dict]:
     """Processes a streaming API response, printing deltas and returning the full text and token counts."""
     full_text = ""
     tokens = {}
@@ -51,16 +90,38 @@ def process_stream(engine_name: str, response: requests.Response) -> tuple[str, 
                         p, c, r, t = parse_token_counts(engine_name, chunk)
                         tokens = {'prompt': p, 'completion': c, 'reasoning': r, 'total': t}
                 if delta:
-                    print(delta, end='', flush=True)
+                    if print_stream:
+                        print(delta, end='', flush=True)
                     full_text += delta
             except (json.JSONDecodeError, KeyError, IndexError):
                 continue
     except KeyboardInterrupt:
-        print(f"\n{SYSTEM_MSG}--> Stream cancelled by user.{RESET_COLOR}", file=sys.stderr)
+        if print_stream:
+            print(f"\n{SYSTEM_MSG}--> Stream cancelled by user.{RESET_COLOR}", file=sys.stderr)
     except requests.exceptions.ChunkedEncodingError:
-        print(f"\n{SYSTEM_MSG}--> Warning: Stream connection interrupted.{RESET_COLOR}", file=sys.stderr)
-    print() # Ensure there's a newline after streaming finishes or is cancelled.
+        if print_stream:
+            print(f"\n{SYSTEM_MSG}--> Warning: Stream connection interrupted.{RESET_COLOR}", file=sys.stderr)
+    if print_stream:
+        print() # Ensure there's a newline after streaming finishes or is cancelled.
     return full_text, tokens
+
+def parse_token_counts(engine_name: str, response_data: dict) -> tuple[int, int, int, int]:
+    """Parses token counts from a response, accommodating different structures."""
+    prompt_tokens, completion_tokens, reasoning_tokens, total_tokens = 0, 0, 0, 0
+    try:
+        if engine_name == 'openai':
+            usage = response_data.get('usage', {})
+            prompt_tokens = usage.get('prompt_tokens', 0)
+            completion_tokens = usage.get('completion_tokens', 0)
+            total_tokens = usage.get('total_tokens', 0)
+        elif engine_name == 'gemini':
+            usage = response_data.get('usageMetadata', {})
+            prompt_tokens = usage.get('promptTokenCount', 0)
+            completion_tokens = usage.get('candidatesTokenCount', 0)
+            total_tokens = usage.get('totalTokenCount', 0)
+    except (KeyError, IndexError):
+        log.warning("Could not parse token counts from API response.")
+    return prompt_tokens, completion_tokens, reasoning_tokens, total_tokens
 
 def extract_text_from_message(message: dict) -> str:
     """Extracts the text content from an OpenAI or Gemini message object."""
@@ -182,12 +243,9 @@ def process_files(file_paths: list, use_memory: bool, exclude_paths: list | None
             log.warning("Could not read %s: %s", config.PERSISTENT_MEMORY_FILE, e)
     for path in file_paths or []:
         abs_path = os.path.abspath(path)
-        if abs_path in exclude_abs or os.path.basename(abs_path) in exclude_base:
-            log.info("Excluding: %s", path)
+        if abs_path in exclude_abs or os.path.basename(path) in exclude_base:
             continue
-        if os.path.isdir(path):
-            _process_directory(path, exclude_abs, exclude_base, text_prompts, image_data)
-        elif os.path.isfile(path):
+        if os.path.isfile(path):
             if path.endswith('.zip'):
                 _process_zipfile(path, exclude_base, text_prompts, image_data)
             else:
@@ -196,24 +254,8 @@ def process_files(file_paths: list, use_memory: bool, exclude_paths: list | None
                         _process_file_content(path, f.read(), text_prompts, image_data)
                 except IOError as e:
                     log.warning("Could not read file %s: %s", path, e)
-    system_prompt = "\n\n".join(text_prompts) if text_prompts else None
-    return system_prompt, image_data
+        elif os.path.isdir(path):
+            _process_directory(path, exclude_abs, exclude_base, text_prompts, image_data)
 
-def parse_token_counts(engine: str, response_data: dict | None) -> tuple[int, int, int, int]:
-    """Extracts prompt, completion, reasoning, and total tokens from an API response."""
-    if not response_data: return 0, 0, 0, 0
-    prompt_tokens, completion_tokens, reasoning_tokens, total_tokens = 0, 0, 0, 0
-    if engine == 'openai':
-        usage = response_data.get('usage', {})
-        prompt_tokens = usage.get('prompt_tokens', 0)
-        total_output_tokens = usage.get('completion_tokens', 0)
-        total_tokens = usage.get('total_tokens', 0)
-        reasoning_tokens = usage.get('completion_tokens_details', {}).get('reasoning_tokens', 0)
-        completion_tokens = total_output_tokens - reasoning_tokens
-    elif engine == 'gemini' and 'usageMetadata' in response_data:
-        usage = response_data.get('usageMetadata', {})
-        prompt_tokens = usage.get('promptTokenCount', 0)
-        completion_tokens = usage.get('candidatesTokenCount', 0)
-        reasoning_tokens = usage.get('thoughtsTokenCount', 0)
-        total_tokens = usage.get('totalTokenCount', 0)
-    return prompt_tokens, completion_tokens, reasoning_tokens, total_tokens
+    system_prompt = "\n\n".join(text_prompts)
+    return system_prompt, image_data

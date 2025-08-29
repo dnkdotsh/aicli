@@ -1,4 +1,20 @@
 # aicli/api_client.py
+# aicli: A command-line interface for interacting with AI models.
+# Copyright (C) 2025 Dank A. Saurus
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 
 import os
 import sys
@@ -88,7 +104,7 @@ def make_api_request(url: str, headers: dict, payload: dict, stream: bool = Fals
         except IOError as e:
             log.warning("Could not write to raw log file: %s", e)
 
-def perform_chat_request(engine: AIEngine, model: str, messages_or_contents: list, system_prompt: str | None, max_tokens: int, stream: bool, session_raw_logs: list | None = None) -> tuple[str, dict]:
+def perform_chat_request(engine: AIEngine, model: str, messages_or_contents: list, system_prompt: str | None, max_tokens: int, stream: bool, session_raw_logs: list | None = None, print_stream: bool = True) -> tuple[str, dict]:
     """Executes a single chat request and returns the response text and token dictionary."""
     url = engine.get_chat_url(model, stream)
     payload = engine.build_chat_payload(messages_or_contents, system_prompt, max_tokens, stream, model)
@@ -100,7 +116,7 @@ def perform_chat_request(engine: AIEngine, model: str, messages_or_contents: lis
         return "", {}
 
     if stream:
-        return utils.process_stream(engine.name, response_obj)
+        return utils.process_stream(engine.name, response_obj, print_stream=print_stream)
 
     response_data = response_obj
     assistant_response = engine.parse_chat_response(response_data)
