@@ -1,4 +1,3 @@
-````markdown
 # Unified Command-Line AI Client (aicli)
 
 A flexible and robust command-line interface for interacting with OpenAI and Google Gemini models.
@@ -26,7 +25,6 @@ From the project root directory:
 ```bash
 # Install the application using pipx
 pipx install .
-````
 
 This will install the `aicli` command globally and make it available in your shell.
 
