@@ -48,6 +48,6 @@ backups/
 !/.env.example
 
 # misc project specific
-scripts/
+
 gpl.txt
 gpl.sh
