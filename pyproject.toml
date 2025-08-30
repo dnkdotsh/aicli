@@ -20,7 +20,8 @@ dependencies = [
 [project.optional-dependencies]
 test = [
     "pytest",
-    "pyfakefs"
+    "pyfakefs",
+    "pytest-mock"
 ]
 
 [project.scripts]
@@ -28,3 +29,6 @@ aicli = "aicli.aicli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

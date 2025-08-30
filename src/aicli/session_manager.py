@@ -29,7 +29,6 @@ from prompt_toolkit.formatted_text import ANSI
 from . import config
 from . import api_client
 from . import utils
-from . import handlers
 from . import settings as app_settings
 from .engine import AIEngine, get_engine
 from .logger import log
@@ -197,6 +196,7 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
             print(f"{utils.SYSTEM_MSG}--> Clear cancelled.{utils.RESET_COLOR}")
 
     elif command == '/model':
+        from . import handlers
         if args:
             state.model = args[0]
             print(f"{utils.SYSTEM_MSG}--> Model temporarily set to: {state.model}{utils.RESET_COLOR}")

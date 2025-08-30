@@ -84,14 +84,14 @@ def make_api_request(url: str, headers: dict, payload: dict, stream: bool = Fals
                 error_details = error_json['error']['message']
             else:
                 error_details = e.response.text
-        except json.JSONDecodeError:
+        except requests.exceptions.JSONDecodeError:
             error_details = e.response.text
         log.error("HTTP Request Error: %s\nDETAILS: %s", e, error_details)
         raise ApiRequestError(error_details) from e
     except requests.exceptions.RequestException as e:
         log.error("Request Error: %s", e)
         raise ApiRequestError(str(e)) from e
-    except json.JSONDecodeError as e:
+    except requests.exceptions.JSONDecodeError as e:
         log.error("Failed to decode API response.")
         raise ApiRequestError("Failed to decode API response.") from e
     finally:
