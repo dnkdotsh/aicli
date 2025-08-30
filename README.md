@@ -25,6 +25,7 @@ From the project root directory:
 ```bash
 # Install the application using pipx
 pipx install .
+```
 
 This will install the `aicli` command globally and make it available in your shell.
 
