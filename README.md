@@ -163,4 +163,5 @@ During an interactive chat session, type these commands instead of a prompt:
 <!-- end list -->
 
 ```
+I literally made this just to make the AI argue against each other. I hope someone else can find some use out of it.
 ```
