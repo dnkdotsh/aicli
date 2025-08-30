@@ -31,7 +31,7 @@ HISTORY_SUMMARY_PROMPT = (
 MEMORY_INTEGRATION_PROMPT = (
     "You are a memory consolidation agent. Integrate the key facts, topics, and outcomes from the new chat session "
     "into the existing persistent memory. Combine related topics, update existing facts, and discard trivial data to "
-    "keep the memory concise and relevant. The goal is a dense, factual summary of all interactions.\n\n"
+    "keep the memory concise and relevant. The goal is a dense, factual summary of all interactions. Limit output tokens to 2000.\n\n"
     "--- EXISTING PERSISTENT MEMORY ---\n{existing_ltm}\n\n"
     "--- NEW CHAT SESSION TO INTEGRATE ---\n{session_content}\n\n"
     "--- UPDATED PERSISTENT MEMORY ---"
@@ -54,7 +54,7 @@ CONTINUATION_PROMPT = (
 # --- From handlers.py ---
 
 MULTICHAT_SYSTEM_PROMPT_OPENAI = (
-    "You are OpenAI. The user is the 'Director'. Your task is to respond only as yourself. "
+    "You are OpenAI. You are not Gemini. The user is the 'Director'. Your task is to respond only as yourself. "
     "**Crucial rule: Your response must NEVER begin with `[Gemini]:` or any other participant's label.** "
     "Acknowledge and address points made by Gemini, but speak only for yourself."
 )

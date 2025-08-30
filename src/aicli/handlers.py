@@ -98,6 +98,34 @@ def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt
         )
         perform_interactive_chat(initial_state, session_name)
 
+def handle_load_session(filepath_str: str):
+    """Loads and starts an interactive session from a file."""
+    # Deferred imports to avoid circular dependencies
+    from .session_manager import load_session_from_file
+    from pathlib import Path
+    from . import config
+
+    raw_path = Path(filepath_str).expanduser()
+
+    # If the path is not absolute, assume it is in the sessions directory
+    if raw_path.is_absolute():
+        filepath = raw_path
+    else:
+        filepath = config.SESSIONS_DIRECTORY / raw_path
+
+    # Ensure the .json extension is present
+    if filepath.suffix != '.json':
+        filepath = filepath.with_suffix('.json')
+
+    initial_state = load_session_from_file(filepath)
+
+    if not initial_state:
+        sys.exit(1)
+
+    # Use the loaded file's name as the base for the new session log
+    session_name = filepath.stem
+    perform_interactive_chat(initial_state, session_name)
+
 def _secondary_worker(engine, model, history, system_prompt, max_tokens, result_queue):
     """A worker function to be run in a thread for the secondary model."""
     try:

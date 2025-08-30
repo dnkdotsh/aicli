@@ -28,6 +28,7 @@ DATA_DIR = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) /
 # --- Log and Data Directories (under DATA_DIR) ---
 LOG_DIRECTORY = DATA_DIR / "logs"
 IMAGE_DIRECTORY = DATA_DIR / "images"
+SESSIONS_DIRECTORY = DATA_DIR / "sessions"
 
 # --- Specific File Paths ---
 SETTINGS_FILE = CONFIG_DIR / "settings.json"

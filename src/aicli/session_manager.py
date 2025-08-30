@@ -20,6 +20,7 @@ import os
 import sys
 import json
 import datetime
+from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from prompt_toolkit import prompt
 from prompt_toolkit.history import InMemoryHistory
@@ -30,7 +31,7 @@ from . import api_client
 from . import utils
 from . import handlers
 from . import settings as app_settings
-from .engine import AIEngine
+from .engine import AIEngine, get_engine
 from .logger import log
 from .prompts import HISTORY_SUMMARY_PROMPT, MEMORY_INTEGRATION_PROMPT, LOG_RENAMING_PROMPT
 
@@ -47,6 +48,84 @@ class SessionState:
     debug_active: bool = False
     stream_active: bool = True
     session_raw_logs: list = field(default_factory=list)
+    exit_without_memory: bool = False
+
+def _generate_session_name(engine: AIEngine, history: list) -> str | None:
+    """Generates a descriptive name for the session using an AI model."""
+    log_content = "\n".join([f"{msg.get('role', 'unknown')}: {utils.extract_text_from_message(msg)}" for msg in history[:10]]) # Use first 5 turns
+    prompt_text = LOG_RENAMING_PROMPT.format(log_content=log_content)
+    
+    helper_model_key = 'helper_model_openai' if engine.name == 'openai' else 'helper_model_gemini'
+    task_model = app_settings.settings[helper_model_key]
+    messages = [utils.construct_user_message(engine.name, prompt_text, [])]
+
+    suggested_name, _ = api_client.perform_chat_request(
+        engine=engine, model=task_model, messages_or_contents=messages,
+        system_prompt=None, max_tokens=app_settings.settings['log_rename_max_tokens'], stream=False
+    )
+
+    if suggested_name and not suggested_name.startswith("API Error:"):
+        return utils.sanitize_filename(suggested_name.strip())
+    
+    reason = suggested_name or "No response from helper model."
+    log.warning("Could not generate a descriptive name for the session log. Reason: %s", reason)
+    return None
+
+def _save_session_to_file(state: SessionState, filename: str) -> bool:
+    """Serializes the current SessionState to a JSON file."""
+    if not filename.endswith('.json'):
+        filename += '.json'
+    
+    # Sanitize the filename part, but keep the extension
+    safe_name = utils.sanitize_filename(filename.rsplit('.', 1)[0]) + '.json'
+    filepath = config.SESSIONS_DIRECTORY / safe_name
+
+    state_dict = asdict(state)
+    state_dict['engine_name'] = state.engine.name
+    del state_dict['engine']
+
+    try:
+        utils.ensure_dir_exists(config.SESSIONS_DIRECTORY)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(state_dict, f, indent=2)
+        print(f"{utils.SYSTEM_MSG}--> Session saved successfully to: {filepath}{utils.RESET_COLOR}")
+        return True
+    except (IOError, TypeError) as e:
+        log.error("Failed to save session state: %s", e)
+        print(f"{utils.SYSTEM_MSG}--> Error saving session: {e}{utils.RESET_COLOR}")
+        return False
+
+def load_session_from_file(filepath: Path) -> SessionState | None:
+    """Loads a session from a file and reconstructs the SessionState."""
+    try:
+        if not filepath.exists():
+            raise FileNotFoundError("The specified session file does not exist.")
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        engine_name = data.pop('engine_name')
+        api_key = api_client.check_api_keys(engine_name)
+        engine_instance = get_engine(engine_name, api_key)
+
+        state = SessionState(engine=engine_instance, **data)
+        
+        print(f"{utils.SYSTEM_MSG}--> Session loaded successfully from: {filepath}{utils.RESET_COLOR}")
+        print(f"{utils.SYSTEM_MSG}--- Last few messages ---{utils.RESET_COLOR}")
+        history_slice = state.history[-4:]
+        for msg in history_slice:
+            role = msg.get('role')
+            content = utils.extract_text_from_message(msg)
+            if role == 'user':
+                print(f"{utils.USER_PROMPT}You: {utils.RESET_COLOR}{content}")
+            elif role in ['assistant', 'model']:
+                print(f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}{content}")
+        print(f"{utils.SYSTEM_MSG}-------------------------{utils.RESET_COLOR}")
+        
+        return state
+    except (FileNotFoundError, IOError, json.JSONDecodeError, KeyError, TypeError, api_client.MissingApiKeyError) as e:
+        log.error("Failed to load session from %s: %s", filepath, e)
+        return None
 
 def _condense_chat_history(state: SessionState):
     """Summarizes the oldest turns and replaces them with a summary message."""
@@ -66,7 +145,7 @@ def _condense_chat_history(state: SessionState):
         engine=state.engine, model=task_model, messages_or_contents=messages,
         system_prompt=None, max_tokens=app_settings.settings['summary_max_tokens'], stream=False
     )
-    if not summary_text or summary_text.startswith("API Error:") or summary_text.startswith("Extraction Error:"):
+    if not summary_text or summary_text.startswith("API Error:"):
         reason = summary_text or "No response from helper model."
         log.warning("History summarization failed. Proceeding with full history. Reason: %s", reason)
         return
@@ -77,8 +156,8 @@ def _condense_chat_history(state: SessionState):
 
 def _handle_slash_command(user_input: str, state: SessionState) -> bool:
     """Handles in-app slash commands. Returns True if the session should end."""
-    parts = user_input.lower().strip().split()
-    command = parts[0]
+    parts = user_input.strip().split()
+    command = parts[0].lower()
     args = parts[1:]
 
     if command == '/exit':
@@ -157,6 +236,51 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
         else:
             print(f"{utils.SYSTEM_MSG}--> Usage: /set <setting_key> <value>{utils.RESET_COLOR}")
 
+    elif command == '/save':
+        should_remember, should_stay = False, False
+        filename_parts = []
+        for arg in args:
+            if arg == '--remember': should_remember = True
+            elif arg == '--stay': should_stay = True
+            else: filename_parts.append(arg)
+        
+        filename = ' '.join(filename_parts) if filename_parts else None
+
+        if not filename:
+            print(f"{utils.SYSTEM_MSG}--> Generating descriptive name for session...{utils.RESET_COLOR}")
+            filename = _generate_session_name(state.engine, state.history)
+            if not filename:
+                print(f"{utils.SYSTEM_MSG}--> Could not auto-generate a name. Save cancelled.{utils.RESET_COLOR}")
+                return False
+
+        if _save_session_to_file(state, filename):
+            if should_stay:
+                return False  # Do not exit
+            if not should_remember:
+                state.exit_without_memory = True  # Signal to skip memory update on exit
+            return True  # Exit
+        return False # Stay in session if save fails
+
+    elif command == '/load':
+        if args:
+            filename = ' '.join(args)
+            if not filename.endswith('.json'):
+                filename += '.json'
+            filepath = config.SESSIONS_DIRECTORY / filename
+            new_state = load_session_from_file(filepath)
+            if new_state:
+                state.engine = new_state.engine
+                state.model = new_state.model
+                state.system_prompt = new_state.system_prompt
+                state.max_tokens = new_state.max_tokens
+                state.memory_enabled = new_state.memory_enabled
+                state.initial_image_data = new_state.initial_image_data
+                state.history = new_state.history
+                state.debug_active = new_state.debug_active
+                state.stream_active = new_state.stream_active
+        else:
+            print(f"{utils.SYSTEM_MSG}--> Usage: /load <filename>{utils.RESET_COLOR}")
+
     else:
         print(f"{utils.SYSTEM_MSG}--> Unknown command: {command}. Type /help for a list of commands.{utils.RESET_COLOR}")
 
@@ -167,6 +291,8 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
     log_filename_base = session_name or f"chat_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}_{initial_state.engine.name}"
     log_filename = os.path.join(config.LOG_DIRECTORY, f"{log_filename_base}.jsonl")
 
+    utils.ensure_dir_exists(config.SESSIONS_DIRECTORY)
+
     print(f"Starting interactive chat with {initial_state.engine.name.capitalize()} ({initial_state.model}).")
     print("Type '/help' for commands or '/exit' to end.")
     print(f"Session log will be saved to: {log_filename}")
@@ -176,22 +302,18 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
     if initial_state.memory_enabled: print("Persistent memory is enabled for this session.")
 
     cli_history = InMemoryHistory()
-    first_turn = True
+    first_turn = not initial_state.history
     try:
         while True:
             prompt_message = f"\n{utils.USER_PROMPT}You: {utils.RESET_COLOR}"
             user_input = prompt(ANSI(prompt_message), history=cli_history)
 
             if not user_input.strip():
-                sys.stdout.write('\x1b[1A') 
-                sys.stdout.write('\x1b[2K') 
-                sys.stdout.flush()
+                sys.stdout.write('\x1b[1A'); sys.stdout.write('\x1b[2K'); sys.stdout.flush()
                 continue
 
             if user_input.startswith('/'):
-                sys.stdout.write('\x1b[1A')
-                sys.stdout.write('\x1b[2K')
-                sys.stdout.flush()
+                sys.stdout.write('\x1b[1A'); sys.stdout.write('\x1b[2K'); sys.stdout.flush()
                 if _handle_slash_command(user_input, initial_state):
                     break
                 continue
@@ -230,6 +352,9 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
         print("\nSession interrupted by user.")
     finally:
         print("\nSession ended.")
+        if initial_state.exit_without_memory:
+            return
+
         if os.path.exists(log_filename) and initial_state.history:
             if initial_state.memory_enabled:
                 _update_persistent_memory(initial_state.engine, initial_state.model, initial_state.history)
@@ -259,17 +384,17 @@ def _update_persistent_memory(engine: AIEngine, model: str, history: list):
         with open(config.PERSISTENT_MEMORY_FILE, 'r', encoding='utf-8') as f:
             existing_ltm = f.read()
 
-    prompt = MEMORY_INTEGRATION_PROMPT.format(existing_ltm=existing_ltm, session_content=session_content)
+    prompt_text = MEMORY_INTEGRATION_PROMPT.format(existing_ltm=existing_ltm, session_content=session_content)
     helper_model_key = 'helper_model_openai' if engine.name == 'openai' else 'helper_model_gemini'
     task_model = app_settings.settings[helper_model_key]
-    messages = [utils.construct_user_message(engine.name, prompt, [])]
+    messages = [utils.construct_user_message(engine.name, prompt_text, [])]
 
     updated_memory, _ = api_client.perform_chat_request(
         engine=engine, model=task_model, messages_or_contents=messages,
         system_prompt=None, max_tokens=app_settings.settings['summary_max_tokens'], stream=False
     )
 
-    if updated_memory and not updated_memory.startswith("API Error:") and not updated_memory.startswith("Extraction Error:"):
+    if updated_memory and not updated_memory.startswith("API Error:"):
         try:
             with open(config.PERSISTENT_MEMORY_FILE, 'w', encoding='utf-8') as f:
                 f.write(updated_memory.strip())
@@ -283,21 +408,10 @@ def _update_persistent_memory(engine: AIEngine, model: str, history: list):
 def rename_session_log(engine: AIEngine, history: list, original_filepath: str):
     """Generates a descriptive name for the session log and renames the file."""
     print(f"{utils.SYSTEM_MSG}--> Generating descriptive name for session log...{utils.RESET_COLOR}")
-    log_content = "\n".join([f"{msg.get('role', 'unknown')}: {utils.extract_text_from_message(msg)}" for msg in history[:10]]) # Use first 5 turns
-    prompt = LOG_RENAMING_PROMPT.format(log_content=log_content)
-    
-    helper_model_key = 'helper_model_openai' if engine.name == 'openai' else 'helper_model_gemini'
-    task_model = app_settings.settings[helper_model_key]
-    messages = [utils.construct_user_message(engine.name, prompt, [])]
+    suggested_name = _generate_session_name(engine, history)
 
-    suggested_name, _ = api_client.perform_chat_request(
-        engine=engine, model=task_model, messages_or_contents=messages,
-        system_prompt=None, max_tokens=app_settings.settings['log_rename_max_tokens'], stream=False
-    )
-
-    if suggested_name and not suggested_name.startswith("API Error:") and not suggested_name.startswith("Extraction Error:"):
-        sanitized_name = utils.sanitize_filename(suggested_name.strip())
-        new_filename = f"{sanitized_name}.jsonl"
+    if suggested_name:
+        new_filename = f"{suggested_name}.jsonl"
         new_filepath = os.path.join(config.LOG_DIRECTORY, new_filename)
         try:
             os.rename(original_filepath, new_filepath)
@@ -305,15 +419,4 @@ def rename_session_log(engine: AIEngine, history: list, original_filepath: str):
         except OSError as e:
             log.error("Failed to rename session log: %s", e)
     else:
-        reason = suggested_name or "No response from helper model."
-        log.warning("Could not generate a descriptive name for the session log. Reason: %s", reason)
-        # Fallback to rename the log with the error message for easier debugging
-        try:
-            error_name = utils.sanitize_filename(reason)
-            new_filename = f"{error_name}.jsonl"
-            new_filepath = os.path.join(config.LOG_DIRECTORY, new_filename)
-            if not os.path.exists(new_filepath):
-                os.rename(original_filepath, new_filepath)
-                print(f"{utils.SYSTEM_MSG}--> Session log renamed to: {new_filepath}{utils.RESET_COLOR}")
-        except OSError as e:
-            log.error("Failed to rename session log with error message: %s", e)
+        log.warning("Could not generate a descriptive name for the session log.")

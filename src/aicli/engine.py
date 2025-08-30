@@ -138,15 +138,23 @@ class GeminiEngine(AIEngine):
     def parse_chat_response(self, response_data: Dict[str, Any]) -> str:
         """Safely extracts text from a Gemini API response."""
         try:
-            return response_data['candidates'][0]['content']['parts'][0]['text']
-        except (KeyError, IndexError):
-            finish_reason = "UNKNOWN"
-            try:
-                finish_reason = response_data.get('candidates', [{}])[0].get('finishReason', 'UNKNOWN')
-                log.warning("Could not extract Gemini response part. Finish reason: %s", finish_reason)
-            except (IndexError, KeyError):
+            # Check for content and parts before accessing them
+            candidate = response_data.get('candidates', [{}])[0]
+            content = candidate.get('content', {})
+            parts = content.get('parts', [])
+            if parts and 'text' in parts[0]:
+                return parts[0]['text']
+
+            # If no text is found, log the reason but return an empty string
+            finish_reason = candidate.get('finishReason', 'UNKNOWN')
+            if finish_reason not in ['UNKNOWN', None]:
+                log.info("Gemini response finished with reason '%s' but no text content.", finish_reason)
+            else:
                 log.warning("Could not extract Gemini response part or finish reason. Full response: %s", response_data)
-            return f"Extraction Error: Finish reason was {finish_reason}"
+            return ""
+        except (KeyError, IndexError):
+            log.warning("Could not parse Gemini response due to unexpected structure. Full response: %s", response_data)
+            return ""
 
     def fetch_available_models(self, task: str) -> List[str]:
         try:

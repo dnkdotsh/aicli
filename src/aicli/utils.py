@@ -149,23 +149,23 @@ def sanitize_filename(name: str) -> str:
     """Sanitizes a string to be a valid filename."""
     name = re.sub(r'[^\w\s-]', '', name).strip()
     name = re.sub(r'[-\s]+', '_', name)
-    return name
+    return name or "unnamed_log"
 
 def translate_history(history: list, target_engine: str) -> list:
     """Translates a conversation history to the target engine's format."""
     translated = []
     for msg in history:
         role = msg.get('role')
-        if target_engine == 'gemini':
-            if role == 'user':
-                translated.append({'role': 'user', 'parts': msg.get('content')})
-            elif role == 'assistant':
-                translated.append({'role': 'model', 'parts': [{'text': extract_text_from_message(msg)}]})
-        elif target_engine == 'openai':
-            if role in ['user', 'model']:
-                translated.append({'role': 'user' if role == 'user' else 'assistant', 'content': msg.get('parts')})
-            else:
-                translated.append(msg)
+        if role not in ['user', 'assistant', 'model']:
+            continue
+
+        text_content = extract_text_from_message(msg)
+
+        if role in ['user']:
+            translated.append(construct_user_message(target_engine, text_content, []))
+        elif role in ['assistant', 'model']:
+            translated.append(construct_assistant_message(target_engine, text_content))
+
     return translated
 
 def construct_user_message(engine_name: str, text: str, image_data: list) -> dict:
@@ -199,21 +199,29 @@ def construct_assistant_message(engine_name: str, text: str) -> dict:
     return {"role": "model", "parts": [{"text": text}]}
 
 def extract_text_from_message(message: Dict[str, Any]) -> str:
-    """Extracts the text part from a potentially complex message object."""
-    content = message.get('content', '')
-    if isinstance(content, str):
-        return content
+    """
+    Extracts the text part from a potentially complex message object from
+    either OpenAI or Gemini format.
+    """
+    content = message.get('content')
+    if isinstance(content, str): return content
     if isinstance(content, list):
         for part in content:
             if isinstance(part, dict) and part.get('type') == 'text':
                 return part.get('text', '')
-    return ''
+
+    parts = message.get('parts')
+    if isinstance(parts, list):
+        for part in parts:
+            if isinstance(part, dict) and 'text' in part:
+                return part.get('text', '')
+
+    return message.get('text', '')
 
 def parse_token_counts(engine_name: str, response_data: dict) -> tuple[int, int, int, int]:
     """Parses token counts from a non-streaming API response."""
     p, c, r, t = 0, 0, 0, 0
-    if not response_data:
-        return 0, 0, 0, 0
+    if not response_data: return 0, 0, 0, 0
 
     if engine_name == 'openai':
         if 'usage' in response_data:
@@ -271,18 +279,9 @@ def process_stream(engine: str, response: Any, print_stream: bool = True) -> Tup
 
 def format_token_string(token_dict: dict) -> str:
     """Formats the token dictionary into a consistent string for display."""
-    p = token_dict.get('prompt', 0)
-    c = token_dict.get('completion', 0)
-    t = token_dict.get('total', 0)
-    r_api = token_dict.get('reasoning', 0)
-    
-    if not any([p, c, t]):
-        return ""
-
-    # Prefer the API's reasoning count, otherwise calculate it.
-    # Ensure it's not negative.
+    p = token_dict.get('prompt', 0); c = token_dict.get('completion', 0); t = token_dict.get('total', 0); r_api = token_dict.get('reasoning', 0)
+    if not any([p, c, t]): return ""
     r = r_api if r_api > 0 else max(0, t - (p + c))
-    
     return f"\n{SYSTEM_MSG}[P:{p}/C:{c}/R:{r}/T:{t}]{RESET_COLOR}"
 
 def display_help(context: str):
@@ -298,6 +297,12 @@ Interactive Chat Commands:
   /clear            Clear the current conversation history.
   /history          Print the JSON of the current conversation history.
   /state            Print the current session state (engine, model, etc.).
+  /save [name] [--stay] [--remember]
+                    Save the session. Auto-generates a name if not provided.
+                    --stay:      Do not exit after saving.
+                    --remember:  Update persistent memory before exiting.
+                    (Default is to save and exit without updating memory).
+  /load <filename>  Load a session, replacing the current one.
   /engine [name]    Switch AI engine (openai/gemini). Translates history.
   /model [name]     Select a new model for the current engine.
   /set key value    Change a setting in settings.py (e.g., /set stream false).

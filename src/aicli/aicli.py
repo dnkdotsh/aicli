@@ -46,6 +46,7 @@ def main():
     utils.ensure_dir_exists(config.CONFIG_DIR)
     utils.ensure_dir_exists(config.LOG_DIRECTORY)
     utils.ensure_dir_exists(config.IMAGE_DIRECTORY)
+    utils.ensure_dir_exists(config.SESSIONS_DIRECTORY)
 
     if len(sys.argv) == 1 and sys.stdin.isatty():
         print(f"Starting interactive chat with default engine ('{settings['default_engine']}')...")
@@ -90,12 +91,13 @@ def main():
     exclusive_mode_group.add_argument('-i', '--image', action='store_true', help='Activate image generation mode (OpenAI only).')
     exclusive_mode_group.add_argument('-b', '--both', nargs='?', const='', type=str, metavar='PROMPT',
                                   help='Activate interactive multi-chat mode with both OpenAI and Gemini.\nOptionally provide an initial prompt.')
+    exclusive_mode_group.add_argument('-l', '--load', type=str, metavar='FILEPATH', help='Load a saved chat session from a file and start in interactive mode.')
 
     context_group.add_argument('-p', '--prompt', type=str, help='Provide a prompt for single-shot chat or image mode.')
     context_group.add_argument('--system-prompt', type=str, help='Specify a system prompt/instruction from a string or file path.')
     context_group.add_argument('-f', '--file', action='append', help="Attach content from files or directories (can be used multiple times).")
     context_group.add_argument('-x', '--exclude', action='append', help="Exclude a file or directory (can be used multiple times).")
-    context_group.add_argument('--memory', action='store_true', help='Force persistent memory on for this session, overriding the default setting.')
+    context_group.add_argument('--memory', '--mem', action='store_true', help='Toggle persistent memory for this session (enables if disabled, disables if enabled).')
 
     session_group.add_argument('-s', '--session-name', type=str, help='Provide a custom name for the chat log file (interactive chat only).')
     session_group.add_argument('--stream', action='store_true', default=None, help="Enable streaming for chat responses.")
@@ -110,7 +112,7 @@ def main():
     if args.both is not None and args.both != '':
         prompt = args.both
     
-    if not sys.stdin.isatty() and not prompt and args.both is None:
+    if not sys.stdin.isatty() and not prompt and args.both is None and not args.load:
         prompt = sys.stdin.read().strip()
 
     if prompt is not None and not prompt.strip():
@@ -126,12 +128,15 @@ def main():
     if args.image and args.engine != 'openai':
         parser.error("--image mode is only supported by the 'openai' engine.")
 
-    if not args.image and args.both is None and (args.prompt or args.file or args.memory or args.session_name or args.system_prompt):
+    if not args.image and args.both is None and not args.load and (args.prompt or args.file or args.memory or args.session_name or args.system_prompt):
         args.chat = True
-    elif not args.chat and not args.image and args.both is None:
+    elif not args.chat and not args.image and args.both is None and not args.load:
         args.chat = True
 
-    memory_enabled_for_session = settings['memory_enabled'] or args.memory
+    # Get the default from settings, then toggle it if the flag is present.
+    memory_enabled_for_session = settings['memory_enabled']
+    if args.memory:
+        memory_enabled_for_session = not memory_enabled_for_session
 
     # Assemble the final system prompt from multiple sources
     system_prompt_parts = []
@@ -156,7 +161,9 @@ def main():
     system_prompt = "\n\n".join(system_prompt_parts) if system_prompt_parts else None
 
     try:
-        if args.both is not None:
+        if args.load:
+            handlers.handle_load_session(args.load)
+        elif args.both is not None:
             handlers.handle_multichat_session(prompt, system_prompt, image_data, args.session_name, args.max_tokens, args.debug)
         elif args.chat:
             api_key = api_client.check_api_keys(args.engine)
