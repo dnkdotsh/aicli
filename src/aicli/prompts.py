@@ -31,7 +31,7 @@ HISTORY_SUMMARY_PROMPT = (
 MEMORY_INTEGRATION_PROMPT = (
     "You are a memory consolidation agent. Integrate the key facts, topics, and outcomes from the new chat session "
     "into the existing persistent memory. Combine related topics, update existing facts, and discard trivial data to "
-    "keep the memory concise and relevant. The goal is a dense, factual summary of all interactions. Limit output tokens to 2000.\n\n"
+    "keep the memory concise and relevant. The goal is a dense, factual summary of all interactions. Output token hard limit: 2048, aim for around 1800.\n\n"
     "--- EXISTING PERSISTENT MEMORY ---\n{existing_ltm}\n\n"
     "--- NEW CHAT SESSION TO INTEGRATE ---\n{session_content}\n\n"
     "--- UPDATED PERSISTENT MEMORY ---"

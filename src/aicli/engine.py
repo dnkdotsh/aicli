@@ -79,6 +79,9 @@ class OpenAIEngine(AIEngine):
             "stream": stream
         }
 
+        if stream:
+            payload['stream_options'] = {"include_usage": True}
+
         if max_tokens:
             # Legacy models ('gpt-4' but not 'gpt-4o', 'gpt-3.5-turbo') use 'max_tokens'.
             # Newer and future models default to 'max_completion_tokens' for better compatibility.

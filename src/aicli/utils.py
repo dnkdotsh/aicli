@@ -274,7 +274,7 @@ def process_stream(engine: str, response: Any, print_stream: bool = True) -> Tup
                     if "[DONE]" in decoded_chunk: break
                     try:
                         data = json.loads(decoded_chunk.split("data: ", 1)[1])
-                        if 'choices' in data and data['choices'][0].get('delta', {}).get('content'):
+                        if 'choices' in data and data['choices'] and data['choices'][0].get('delta', {}).get('content'):
                             text_chunk = data['choices'][0]['delta']['content']
                             if print_stream: sys.stdout.write(text_chunk); sys.stdout.flush()
                             full_response += text_chunk
