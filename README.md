@@ -162,6 +162,4 @@ During an interactive chat session, type these commands instead of a prompt:
 
 <!-- end list -->
 
-```
-I literally made this just to make the AI argue against each other. I hope someone else can find some use out of it.
-```
+<small>I literally just made this to make the AI argue against each other. I hope someone else can find a better use for it.</small>
