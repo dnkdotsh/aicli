@@ -43,34 +43,33 @@ class CustomHelpFormatter(argparse.RawTextHelpFormatter, argparse.ArgumentDefaul
 
 def run_chat_command(args):
     """Orchestrates the application flow for all chat-related commands."""
-    prompt = args.prompt
-    if args.both is not None and args.both != '':
-        prompt = args.both
-    
-    # Handle piped input if no other prompt source is available
-    if not sys.stdin.isatty() and not prompt and args.both is None and not args.load:
-        prompt = sys.stdin.read().strip()
-
-    # Validate arguments
-    if prompt is not None and not prompt.strip():
-        # This function should ideally take the parser object to call .error()
-        # For now, we print and exit for simplicity in this refactor.
-        print("Error: The provided prompt cannot be empty or contain only whitespace.", file=sys.stderr)
+    # --- Argument Validation ---
+    # Perform all validation checks upfront before any processing.
+    if args.image and args.engine != 'openai':
+        print("Error: --image mode is only supported by the 'openai' engine.", file=sys.stderr)
         sys.exit(1)
-
+    if args.both is not None and args.prompt:
+        print("Error: Provide an initial prompt via --both \"PROMPT\" or --prompt \"PROMPT\", but not both.", file=sys.stderr)
+        sys.exit(1)
     if args.file:
         for path in args.file:
             if not os.path.exists(path):
                 print(f"Error: The file or directory '{path}' does not exist.", file=sys.stderr)
                 sys.exit(1)
 
-    if args.both is not None and args.prompt:
-        print("Error: Provide an initial prompt via --both \"PROMPT\" or --prompt \"PROMPT\", but not both.", file=sys.stderr)
+    prompt = args.prompt
+    if args.both is not None and args.both != '':
+        prompt = args.both
+
+    # Handle piped input if no other prompt source is available
+    if not sys.stdin.isatty() and not prompt and args.both is None and not args.load:
+        prompt = sys.stdin.read().strip()
+
+    # Further prompt validation after potential stdin read
+    if prompt is not None and not prompt.strip():
+        print("Error: The provided prompt cannot be empty or contain only whitespace.", file=sys.stderr)
         sys.exit(1)
-    if args.image and args.engine != 'openai':
-        print("Error: --image mode is only supported by the 'openai' engine.", file=sys.stderr)
-        sys.exit(1)
-        
+
     # If no specific mode is chosen, but flags that imply chat are used, default to chat mode
     is_chat_implied = (args.prompt or args.file or args.memory or args.session_name or args.system_prompt)
     if not args.image and args.both is None and not args.load and is_chat_implied:
@@ -92,7 +91,7 @@ def run_chat_command(args):
             print(f"Error reading system prompt file: {e}", file=sys.stderr)
             sys.exit(1)
 
-    memory_content, attachments_content, image_data = utils.process_files(
+    memory_content, attachments_content, image_data, processed_text_files = utils.process_files(
         args.file, memory_enabled_for_session, args.exclude
     )
 
@@ -115,7 +114,7 @@ def run_chat_command(args):
             engine_instance = get_engine(args.engine, api_key)
             model_key = 'default_openai_chat_model' if args.engine == 'openai' else 'default_gemini_model'
             model = args.model or settings[model_key]
-            handlers.handle_chat(engine_instance, model, system_prompt, prompt, image_data, args.session_name, args.max_tokens, args.stream, memory_enabled_for_session, args.debug)
+            handlers.handle_chat(engine_instance, model, system_prompt, prompt, image_data, processed_text_files, args.session_name, args.max_tokens, args.stream, memory_enabled_for_session, args.debug)
         elif args.image:
             api_key = api_client.check_api_keys(args.engine)
             engine_instance = get_engine(args.engine, api_key)
@@ -184,15 +183,15 @@ def main():
         # If 'chat' is explicitly typed, remove it so the parent parser doesn't see it as an unknown arg.
         if is_chat_command:
             args_list = args_list[1:]
-        
+
         # Handle the default case (no subcommand) by just parsing against the parent.
         args = chat_parent_parser.parse_args(args_list)
-        
+
         # This handles the no-arg `aicli` case for interactive chat.
         if not args_list and sys.stdin.isatty():
              # Mimic the original no-arg behavior
              print(f"Starting interactive chat with default engine ('{settings['default_engine']}')...")
-             handlers.handle_chat(get_engine(settings['default_engine'], api_client.check_api_keys(settings['default_engine'])), settings['default_gemini_model'], None, None, [], None, None, True, True, False)
+             handlers.handle_chat(get_engine(settings['default_engine'], api_client.check_api_keys(settings['default_engine'])), settings['default_gemini_model'], None, None, [], [], None, None, True, True, False)
         else:
              run_chat_command(args)
 

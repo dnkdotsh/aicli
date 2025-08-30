@@ -49,7 +49,7 @@ class TestUtils:
         # Setup fake directories and files
         fake_fs.create_dir(config.DATA_DIR)
         fake_fs.create_file(config.PERSISTENT_MEMORY_FILE, contents="persistent memory data")
-        
+
         project_dir = Path("/fake_project")
         fake_fs.create_dir(project_dir / "src")
         fake_fs.create_file(project_dir / "src/main.py", contents="print('hello')")
@@ -57,7 +57,7 @@ class TestUtils:
         fake_fs.create_file(project_dir / "ignore.log", contents="log data") # Should be ignored
 
         # Test processing a directory
-        mem, attachments, images = utils.process_files(
+        mem, attachments, images, processed_files = utils.process_files(
             paths=[str(project_dir)],
             use_memory=True,
             exclusions=["ignore.log"]
@@ -68,3 +68,4 @@ class TestUtils:
         assert "--- FILE: /fake_project/README.md ---\n# Read Me" in attachments
         assert "ignore.log" not in attachments
         assert images == []
+        assert len(processed_files) == 2

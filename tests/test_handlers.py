@@ -28,6 +28,7 @@ def test_handle_chat_single_shot(mocker, capsys):
         system_prompt="Be brief.",
         initial_prompt="Test prompt.",
         image_data=[],
+        processed_text_files=[],
         session_name=None,
         max_tokens=100,
         stream=False,
@@ -37,7 +38,7 @@ def test_handle_chat_single_shot(mocker, capsys):
 
     # Verify the API client was called correctly
     mock_perform_chat.assert_called_once()
-    call_args = mock_perform_chat.call_args[0]
+    call_args, _ = mock_perform_chat.call_args
     assert call_args[0] == mock_engine
     assert call_args[1] == "gpt-4o-mini"
     assert call_args[3] == "Be brief."

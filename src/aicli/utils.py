@@ -68,17 +68,18 @@ def is_supported_image_file(filepath: Path) -> bool:
     mimetype, _ = mimetypes.guess_type(filepath)
     return mimetype in SUPPORTED_IMAGE_MIMETYPES
 
-def process_files(paths: list | None, use_memory: bool, exclusions: list | None) -> tuple[str | None, str | None, list]:
+def process_files(paths: list | None, use_memory: bool, exclusions: list | None) -> tuple[str | None, str | None, list, list]:
     """
     Processes files, directories, and memory to build context.
-    Returns memory content, attachment content, and image data separately.
+    Returns memory content, attachment content, image data, and a list of processed text file paths.
     """
-    if paths is None: paths = []
-    if exclusions is None: exclusions = []
+    paths = paths or []
+    exclusions = exclusions or []
 
     memory_content_parts = []
     attachments_content_parts = []
     image_data_parts = []
+    processed_text_files = []
 
     if use_memory and os.path.exists(config.PERSISTENT_MEMORY_FILE):
         try:
@@ -87,63 +88,88 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
         except IOError as e:
             log.warning("Could not read persistent memory file: %s", e)
 
-    exclusion_set = {Path(p).name for p in exclusions} | set(exclusions)
+    # Convert string paths to Path objects for consistent handling.
+    # Using realpath to resolve symlinks and '..'
+    exclusion_paths = {Path(p).resolve() for p in exclusions}
 
-    def should_exclude(path: Path) -> bool:
-        return path.name in exclusion_set or str(path) in exclusion_set
+    def process_text_file(filepath: Path, source_info: str = ""):
+        """Helper to read and append text file content."""
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+                source = f" (from {source_info})" if source_info else ""
+                attachments_content_parts.append(f"--- FILE{source}: {filepath.as_posix()} ---\n{content}")
+                processed_text_files.append(filepath)
+        except IOError as e:
+            log.warning("Could not read file %s: %s", filepath, e)
 
-    def process_path(path_obj: Path):
-        if should_exclude(path_obj): return
-        if not path_obj.exists():
-            log.warning("Path not found, skipping: %s", path_obj)
-            return
+    def process_image_file(filepath: Path):
+        """Helper to read and encode image file data."""
+        try:
+            with open(filepath, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+                mimetype, _ = mimetypes.guess_type(filepath)
+                if mimetype in SUPPORTED_IMAGE_MIMETYPES:
+                    image_data_parts.append({"type": "image", "data": encoded_string, "mime_type": mimetype})
+        except IOError as e:
+            log.warning("Could not read image file %s: %s", filepath, e)
 
-        if path_obj.is_dir():
-            for root, _, files in os.walk(path_obj):
-                root_path = Path(root)
-                if should_exclude(root_path): continue
-                for file in files:
-                    file_path = root_path / file
-                    if not should_exclude(file_path): process_path(file_path)
-        elif path_obj.is_file():
-            if path_obj.suffix.lower() == '.zip':
-                process_zip(path_obj)
-            elif is_supported_text_file(path_obj):
-                try:
-                    with open(path_obj, 'r', encoding='utf-8', errors='ignore') as f:
-                        content = f.read()
-                        attachments_content_parts.append(f"--- FILE: {path_obj} ---\n{content}")
-                except IOError as e:
-                    log.warning("Could not read file %s: %s", path_obj, e)
-            elif is_supported_image_file(path_obj):
-                try:
-                    with open(path_obj, "rb") as image_file:
-                        encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
-                        mimetype, _ = mimetypes.guess_type(path_obj)
-                        image_data_parts.append({"type": "image", "data": encoded_string, "mime_type": mimetype})
-                except IOError as e:
-                    log.warning("Could not read image file %s: %s", path_obj, e)
-
-    def process_zip(zip_path: Path):
+    def process_zip_file(zip_path: Path):
+        """Helper to process text files within a zip archive."""
         try:
             with zipfile.ZipFile(zip_path, 'r') as z:
                 for filename in z.namelist():
-                    if not filename.endswith('/'):
-                        file_path = Path(filename)
-                        if should_exclude(file_path): continue
-                        if is_supported_text_file(file_path):
-                            with z.open(filename) as f:
-                                content = f.read().decode('utf-8', errors='ignore')
-                                attachments_content_parts.append(f"--- FILE (from {zip_path.name}): {filename} ---\n{content}")
+                    if filename.endswith('/'): continue # Skip directories
+
+                    # Check if the file inside the zip is excluded
+                    # Note: This is a simple name check. It won't handle complex nested exclusions.
+                    if Path(filename).name in {p.name for p in exclusion_paths}:
+                        continue
+
+                    if is_supported_text_file(Path(filename)):
+                        with z.open(filename) as f:
+                            content = f.read().decode('utf-8', errors='ignore')
+                            attachments_content_parts.append(f"--- FILE (from {zip_path.name}): {filename} ---\n{content}")
         except (zipfile.BadZipFile, IOError) as e:
             log.warning("Could not process zip file %s: %s", zip_path, e)
 
-    for p in paths: process_path(Path(p))
+    for p_str in paths:
+        path_obj = Path(p_str).resolve()
+
+        if path_obj in exclusion_paths:
+            continue
+        if not path_obj.exists():
+            log.warning("Path not found, skipping: %s", path_obj)
+            continue
+
+        if path_obj.is_file():
+            if path_obj.suffix.lower() == '.zip':
+                process_zip_file(path_obj)
+            elif is_supported_text_file(path_obj):
+                process_text_file(path_obj)
+            elif is_supported_image_file(path_obj):
+                process_image_file(path_obj)
+        elif path_obj.is_dir():
+            for root, dirs, files in os.walk(path_obj, topdown=True):
+                root_path = Path(root).resolve()
+
+                # Prune excluded directories from traversal
+                dirs[:] = [d for d in dirs if (root_path / d).resolve() not in exclusion_paths]
+
+                for name in files:
+                    file_path = (root_path / name).resolve()
+                    if file_path in exclusion_paths:
+                        continue
+
+                    if is_supported_text_file(file_path):
+                        process_text_file(file_path)
+                    elif is_supported_image_file(file_path):
+                        process_image_file(file_path)
 
     memory_str = "\n".join(memory_content_parts) if memory_content_parts else None
     attachments_str = "\n\n".join(attachments_content_parts) if attachments_content_parts else None
 
-    return memory_str, attachments_str, image_data_parts
+    return memory_str, attachments_str, image_data_parts, processed_text_files
 
 def sanitize_filename(name: str) -> str:
     """Sanitizes a string to be a valid filename."""

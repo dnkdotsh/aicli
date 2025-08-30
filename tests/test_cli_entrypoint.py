@@ -36,7 +36,7 @@ class TestCLIEntrypoint:
         aicli.main()
         aicli.handlers.handle_chat.assert_called_once()
         # Check that it's an interactive call (initial_prompt is None)
-        call_args = aicli.handlers.handle_chat.call_args[0]
+        call_args, _ = aicli.handlers.handle_chat.call_args
         assert call_args[3] is None
 
     def test_prompt_arg_calls_handle_chat(self, monkeypatch):
@@ -45,8 +45,8 @@ class TestCLIEntrypoint:
         aicli.main()
         aicli.handlers.handle_chat.assert_called_once()
         # Check that the prompt is passed correctly
-        call_args = aicli.handlers.handle_chat.call_args
-        assert call_args.kwargs['prompt'] == 'hello world'
+        call_args, _ = aicli.handlers.handle_chat.call_args
+        assert call_args[3] == 'hello world'
 
     def test_piped_input_calls_handle_chat(self, monkeypatch):
         """Tests that piped input is correctly passed as a prompt."""
@@ -56,12 +56,12 @@ class TestCLIEntrypoint:
         aicli.main()
         aicli.handlers.handle_chat.assert_called_once()
         # Check that the piped content is used as the prompt
-        call_args = aicli.handlers.handle_chat.call_args
-        assert call_args.kwargs['prompt'] == 'piped content'
+        call_args, _ = aicli.handlers.handle_chat.call_args
+        assert call_args[3] == 'piped content'
 
     def test_image_mode_calls_handle_image(self, monkeypatch):
         """Tests that `aicli --image` calls the image handler."""
-        monkeypatch.setattr(sys, 'argv', ['aicli', '--image', '-p', 'a test image'])
+        monkeypatch.setattr(sys, 'argv', ['aicli', '--image', '-p', 'a test image', '--engine', 'openai'])
         aicli.main()
         aicli.handlers.handle_image_generation.assert_called_once()
         aicli.handlers.handle_chat.assert_not_called()
@@ -89,5 +89,6 @@ class TestCLIEntrypoint:
     def test_image_with_gemini_exits(self, monkeypatch):
         """Tests that using --image with the gemini engine correctly exits."""
         monkeypatch.setattr(sys, 'argv', ['aicli', '--image', '--engine', 'gemini'])
+        monkeypatch.setattr('sys.stdin', io.StringIO('')) # Mock stdin to avoid pytest capture error
         with pytest.raises(SystemExit):
             aicli.main()

@@ -73,7 +73,7 @@ def select_model(engine: AIEngine, task: str) -> str:
     print(f"Invalid selection. Using default: {default_model}")
     return default_model
 
-def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt: str, image_data: list, session_name: str, max_tokens: int, stream: bool, memory_enabled: bool, debug_enabled: bool):
+def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt: str, image_data: list, processed_text_files: list, session_name: str, max_tokens: int, stream: bool, memory_enabled: bool, debug_enabled: bool):
     """Handles both single-shot and interactive chat sessions."""
     if initial_prompt:
         # Handle single-shot chat
@@ -91,6 +91,7 @@ def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt
             model=model,
             system_prompt=system_prompt,
             initial_image_data=image_data,
+            attached_text_files=processed_text_files,
             stream_active=stream,
             memory_enabled=memory_enabled,
             debug_active=debug_enabled,
@@ -191,7 +192,7 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
         # Handle slash commands for targeted prompts
         if prompt_text.lower().strip().startswith('/ai'):
             parts = prompt_text.strip().split(' ', 2)
-            
+
             if len(parts) < 2 or parts[1].lower() not in engine_aliases:
                 print(f"{utils.SYSTEM_MSG}--> Usage: /ai <gpt|gem> [prompt]{utils.RESET_COLOR}")
                 return
@@ -199,20 +200,20 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
             target_alias = parts[1].lower()
             target_engine_name = engine_aliases[target_alias]
             target_prompt = parts[2] if len(parts) > 2 else CONTINUATION_PROMPT
-            
+
             target_engine = engines[target_engine_name]
             target_model = models[target_engine_name]
-            
+
             user_msg_text = f"Director to {target_engine.name.capitalize()}: {target_prompt}"
             user_msg = utils.construct_user_message(target_engine.name, user_msg_text, image_data if turn_counter == 1 else [])
             current_history = utils.translate_history(shared_history + [user_msg], target_engine.name)
-            
+
             print(f"\n{utils.ASSISTANT_PROMPT}[{target_engine.name.capitalize()}]: {utils.RESET_COLOR}", end='', flush=True)
             response_text, _ = api_client.perform_chat_request(target_engine, target_model, current_history, sys_prompts[target_engine_name], max_tokens, stream=True)
-            
+
             prefix = f"[{target_engine.name.capitalize()}]: "
             asst_msg_text = response_text if response_text.lstrip().startswith(prefix) else f"{prefix}{response_text}"
-            
+
             asst_msg = utils.construct_assistant_message('openai', asst_msg_text)
             shared_history.extend([utils.construct_user_message('openai', user_msg_text, []), asst_msg])
 
@@ -220,9 +221,9 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
         else:
             user_msg_text = f"Director to All: {prompt_text}"
             user_msg_for_history = utils.construct_user_message('openai', user_msg_text, [])
-            
+
             result_queue = queue.Queue()
-            
+
             history_for_primary = utils.translate_history(shared_history + [user_msg_for_history], primary_engine.name)
             history_for_secondary = utils.translate_history(shared_history + [user_msg_for_history], secondary_engine.name)
 
@@ -231,18 +232,18 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
                 args=(secondary_engine, models[secondary_engine.name], history_for_secondary, sys_prompts[secondary_engine.name], max_tokens, result_queue)
             )
             secondary_thread.start()
-            
+
             print(f"\n{utils.ASSISTANT_PROMPT}[{primary_engine.name.capitalize()}]: {utils.RESET_COLOR}", end='', flush=True)
             primary_response, _ = api_client.perform_chat_request(primary_engine, models[primary_engine.name], history_for_primary, sys_prompts[primary_engine.name], max_tokens, stream=True)
-            
+
             secondary_thread.join()
             secondary_response = result_queue.get()
-            
+
             print(f"\n{utils.ASSISTANT_PROMPT}[{secondary_engine.name.capitalize()}]: {utils.RESET_COLOR}{secondary_response}")
-            
+
             primary_prefix = f"[{primary_engine.name.capitalize()}]: "
             primary_response_text = primary_response if primary_response.lstrip().startswith(primary_prefix) else f"{primary_prefix}{primary_response}"
-            
+
             secondary_prefix = f"[{secondary_engine.name.capitalize()}]: "
             secondary_response_text = secondary_response if secondary_response.lstrip().startswith(secondary_prefix) else f"{secondary_prefix}{secondary_response}"
 
@@ -251,7 +252,7 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
 
             first_msg, second_msg = (primary_msg, secondary_msg) if primary_engine_name == 'openai' else (secondary_msg, primary_msg)
             shared_history.extend([user_msg_for_history, first_msg, second_msg])
-        
+
         try:
             with open(log_filename, 'a', encoding='utf-8') as f:
                 f.write(json.dumps({"turn": turn_counter, "history_slice": shared_history[-3:] if not prompt_text.lower().strip().startswith('/ai') else shared_history[-2:]}) + '\n')
@@ -271,13 +272,13 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
                 sys.stdout.write('\x1b[2K')
                 sys.stdout.flush()
                 continue
-            
+
             is_command = user_input.lstrip().startswith('/')
             if is_command:
                 sys.stdout.write('\x1b[1A')
                 sys.stdout.write('\x1b[2K')
                 sys.stdout.flush()
-            
+
             if user_input.lower().strip() == '/exit':
                 break
             if user_input.lower().strip() == '/help':
@@ -286,7 +287,7 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
             if user_input.lower().strip() == '/history':
                 print(json.dumps(shared_history, indent=2))
                 continue
-                
+
             process_turn(user_input)
     except (KeyboardInterrupt, EOFError):
         print("\nSession interrupted.")

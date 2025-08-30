@@ -34,6 +34,17 @@ from .engine import AIEngine, get_engine
 from .logger import log
 from .prompts import HISTORY_SUMMARY_PROMPT, MEMORY_INTEGRATION_PROMPT, LOG_RENAMING_PROMPT
 
+def _format_bytes(byte_count: int) -> str:
+    """Converts a byte count to a human-readable string (KB, MB, etc.)."""
+    if byte_count is None: return "0 B"
+    power = 1024
+    n = 0
+    power_labels = {0: 'B', 1: 'KB', 2: 'MB', 3: 'GB', 4: 'TB'}
+    while byte_count >= power and n < len(power_labels) -1 :
+        byte_count /= power
+        n += 1
+    return f"{byte_count:.2f} {power_labels[n]}"
+
 @dataclass
 class SessionState:
     """A dataclass to hold the state of an interactive chat session."""
@@ -43,6 +54,7 @@ class SessionState:
     max_tokens: int | None
     memory_enabled: bool
     initial_image_data: list = field(default_factory=list)
+    attached_text_files: list = field(default_factory=list) # Stores Path objects of text files
     history: list = field(default_factory=list)
     debug_active: bool = False
     stream_active: bool = True
@@ -53,7 +65,7 @@ def _generate_session_name(engine: AIEngine, history: list) -> str | None:
     """Generates a descriptive name for the session using an AI model."""
     log_content = "\n".join([f"{msg.get('role', 'unknown')}: {utils.extract_text_from_message(msg)}" for msg in history[:10]]) # Use first 5 turns
     prompt_text = LOG_RENAMING_PROMPT.format(log_content=log_content)
-    
+
     helper_model_key = 'helper_model_openai' if engine.name == 'openai' else 'helper_model_gemini'
     task_model = app_settings.settings[helper_model_key]
     messages = [utils.construct_user_message(engine.name, prompt_text, [])]
@@ -65,7 +77,7 @@ def _generate_session_name(engine: AIEngine, history: list) -> str | None:
 
     if suggested_name and not suggested_name.startswith("API Error:"):
         return utils.sanitize_filename(suggested_name.strip())
-    
+
     reason = suggested_name or "No response from helper model."
     log.warning("Could not generate a descriptive name for the session log. Reason: %s", reason)
     return None
@@ -74,7 +86,7 @@ def _save_session_to_file(state: SessionState, filename: str) -> bool:
     """Serializes the current SessionState to a JSON file."""
     if not filename.endswith('.json'):
         filename += '.json'
-    
+
     # Sanitize the filename part, but keep the extension
     safe_name = utils.sanitize_filename(filename.rsplit('.', 1)[0]) + '.json'
     filepath = config.SESSIONS_DIRECTORY / safe_name
@@ -82,6 +94,9 @@ def _save_session_to_file(state: SessionState, filename: str) -> bool:
     state_dict = asdict(state)
     state_dict['engine_name'] = state.engine.name
     del state_dict['engine']
+    # Convert Path objects to strings for JSON serialization
+    state_dict['attached_text_files'] = [str(p) for p in state.attached_text_files]
+
 
     try:
         utils.ensure_dir_exists(config.SESSIONS_DIRECTORY)
@@ -103,12 +118,16 @@ def load_session_from_file(filepath: Path) -> SessionState | None:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
+        # Convert file paths back to Path objects
+        if 'attached_text_files' in data:
+            data['attached_text_files'] = [Path(p) for p in data['attached_text_files']]
+
         engine_name = data.pop('engine_name')
         api_key = api_client.check_api_keys(engine_name)
         engine_instance = get_engine(engine_name, api_key)
 
         state = SessionState(engine=engine_instance, **data)
-        
+
         print(f"{utils.SYSTEM_MSG}--> Session loaded successfully from: {filepath}{utils.RESET_COLOR}")
         print(f"{utils.SYSTEM_MSG}--- Last few messages ---{utils.RESET_COLOR}")
         history_slice = state.history[-4:]
@@ -120,7 +139,7 @@ def load_session_from_file(filepath: Path) -> SessionState | None:
             elif role in ['assistant', 'model']:
                 print(f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}{content}")
         print(f"{utils.SYSTEM_MSG}-------------------------{utils.RESET_COLOR}")
-        
+
         return state
     except (FileNotFoundError, IOError, json.JSONDecodeError, KeyError, TypeError, api_client.MissingApiKeyError) as e:
         log.error("Failed to load session from %s: %s", filepath, e)
@@ -161,7 +180,7 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
 
     if command == '/exit':
         return True
-    
+
     elif command == '/help':
         utils.display_help('chat')
 
@@ -179,7 +198,7 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
         state.memory_enabled = not state.memory_enabled
         status = "ENABLED" if state.memory_enabled else "DISABLED"
         print(f"{utils.SYSTEM_MSG}--> Persistent memory is now {status} for saving at the end of this session.{utils.RESET_COLOR}")
-        
+
     elif command == '/max-tokens':
         if args and args[0].isdigit():
             state.max_tokens = int(args[0])
@@ -224,11 +243,24 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
         print(json.dumps(state.history, indent=2))
 
     elif command == '/state':
-        state_dict = asdict(state)
-        state_dict['engine'] = state.engine.name
-        state_dict.pop('session_raw_logs', None)
-        state_dict.pop('history', None)
-        print(json.dumps(state_dict, indent=2))
+        print(f"{utils.SYSTEM_MSG}--- Session State ---{utils.RESET_COLOR}")
+        print(f"  Engine: {state.engine.name}")
+        print(f"  Model: {state.model}")
+        print(f"  Max Tokens: {state.max_tokens or 'Default'}")
+        print(f"  Streaming: {'On' if state.stream_active else 'Off'}")
+        print(f"  Memory Enabled (on exit): {'On' if state.memory_enabled else 'Off'}")
+        print(f"  Debug Logging: {'On' if state.debug_active else 'Off'}")
+        print(f"  System Prompt: {'Active' if state.system_prompt else 'None'}")
+        if state.attached_text_files:
+            print("\n  Attached Text Files:")
+            for p in state.attached_text_files:
+                try:
+                    size = p.stat().st_size
+                    print(f"    - {p.name} ({_format_bytes(size)})")
+                except FileNotFoundError:
+                    print(f"    - {p.name} (File not found)")
+        if state.initial_image_data:
+             print(f"\n  Attached Images: {len(state.initial_image_data)}")
 
     elif command == '/set':
         if len(args) == 2:
@@ -243,7 +275,7 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
             if arg == '--remember': should_remember = True
             elif arg == '--stay': should_stay = True
             else: filename_parts.append(arg)
-        
+
         filename = ' '.join(filename_parts) if filename_parts else None
 
         if not filename:
@@ -278,6 +310,7 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
                 state.history = new_state.history
                 state.debug_active = new_state.debug_active
                 state.stream_active = new_state.stream_active
+                state.attached_text_files = new_state.attached_text_files
         else:
             print(f"{utils.SYSTEM_MSG}--> Usage: /load <filename>{utils.RESET_COLOR}")
 
@@ -297,9 +330,18 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
     print("Type '/help' for commands or '/exit' to end.")
     print(f"Session log will be saved to: {log_filename}")
 
-    if initial_state.system_prompt: print("System prompt is active.")
-    if initial_state.initial_image_data: print(f"Attached {len(initial_state.initial_image_data)} image(s) to this session.")
-    if initial_state.memory_enabled: print("Persistent memory is enabled for this session.")
+    if initial_state.system_prompt: print(f"{utils.SYSTEM_MSG}System prompt is active.{utils.RESET_COLOR}")
+    if initial_state.attached_text_files:
+        print(f"{utils.SYSTEM_MSG}Attached Text Files:{utils.RESET_COLOR}")
+        for p in initial_state.attached_text_files:
+             try:
+                 size = p.stat().st_size
+                 print(f"  - {p.name} ({_format_bytes(size)})")
+             except FileNotFoundError:
+                 print(f"  - {p.name} (File not found)")
+    if initial_state.initial_image_data: print(f"{utils.SYSTEM_MSG}Attached {len(initial_state.initial_image_data)} image(s) to this session.{utils.RESET_COLOR}")
+    if initial_state.memory_enabled: print(f"{utils.SYSTEM_MSG}Persistent memory is enabled for this session.{utils.RESET_COLOR}")
+
 
     cli_history = InMemoryHistory()
     first_turn = not initial_state.history
