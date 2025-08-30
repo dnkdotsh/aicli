@@ -162,4 +162,6 @@ During an interactive chat session, type these commands instead of a prompt:
 
 <!-- end list -->
 
+## Final thoughts
+
 <small>I literally just made this to make the AI argue against each other. I hope someone else can find a better use for it.</small>
