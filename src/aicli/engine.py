@@ -6,9 +6,9 @@
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# but WITHOUT ANY WARRANTY;
+# without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -21,10 +21,10 @@ import requests
 import sys
 from typing import Dict, Any, List, Tuple
 
-import config
-import utils
-from logger import log
-from settings import settings
+from . import config
+from . import utils
+from .logger import log
+from .settings import settings
 
 class AIEngine(abc.ABC):
     """Abstract base class for an AI engine provider."""
@@ -89,8 +89,10 @@ class OpenAIEngine(AIEngine):
         return payload
 
     def parse_chat_response(self, response_data: Dict[str, Any]) -> str:
-        if 'choices' in response_data:
-            return utils.extract_text_from_message(response_data['choices'][0]['message'])
+        if 'choices' in response_data and response_data['choices']:
+            message = response_data['choices'][0].get('message')
+            if message:
+                return utils.extract_text_from_message(message)
         return ""
 
     def fetch_available_models(self, task: str) -> List[str]:
@@ -136,11 +138,15 @@ class GeminiEngine(AIEngine):
     def parse_chat_response(self, response_data: Dict[str, Any]) -> str:
         """Safely extracts text from a Gemini API response."""
         try:
-            return response_data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+            return response_data['candidates'][0]['content']['parts'][0]['text']
         except (KeyError, IndexError):
-            finish_reason = response_data.get('candidates', [{}])[0].get('finishReason', 'UNKNOWN')
-            log.warning("Could not extract Gemini response part. Finish reason: %s", finish_reason)
-        return ""
+            finish_reason = "UNKNOWN"
+            try:
+                finish_reason = response_data.get('candidates', [{}])[0].get('finishReason', 'UNKNOWN')
+                log.warning("Could not extract Gemini response part. Finish reason: %s", finish_reason)
+            except (IndexError, KeyError):
+                log.warning("Could not extract Gemini response part or finish reason. Full response: %s", response_data)
+            return f"Extraction Error: Finish reason was {finish_reason}"
 
     def fetch_available_models(self, task: str) -> List[str]:
         try:

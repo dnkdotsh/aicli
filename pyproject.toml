@@ -1,20 +1,30 @@
 # pyproject.toml
 
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "aicli"
-version = "1.0.0"
+version = "1.1.0"
 description = "A unified command-line client for OpenAI and Google Gemini."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "GNU General Public License v3.0" }
 dependencies = [
     "requests",
+    "prompt-toolkit",
+    "python-dotenv"
 ]
 
 [project.optional-dependencies]
-dev = [
+test = [
     "pytest",
+    "pyfakefs"
 ]
 
 [project.scripts]
 aicli = "aicli.aicli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

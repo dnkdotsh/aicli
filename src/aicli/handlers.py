@@ -6,9 +6,9 @@
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# but WITHOUT ANY WARRANTY;
+# without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -29,14 +29,14 @@ from prompt_toolkit import prompt
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.formatted_text import ANSI
 
-import config
-import api_client
-import utils
-from engine import AIEngine, get_engine
-from session_manager import perform_interactive_chat, SessionState
-from settings import settings
-from logger import log
-from prompts import (MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI,
+from . import config
+from . import api_client
+from . import utils
+from .engine import AIEngine, get_engine
+from .session_manager import perform_interactive_chat, SessionState
+from .settings import settings
+from .logger import log
+from .prompts import (MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI,
                      CONTINUATION_PROMPT)
 
 def select_model(engine: AIEngine, task: str) -> str:
@@ -122,12 +122,12 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
     gemini_engine = get_engine('gemini', gemini_key)
     openai_model = settings['default_openai_chat_model']
     gemini_model = settings['default_gemini_model']
-    
+
     primary_engine_name = settings['default_engine']
-    
+
     engines = {'openai': openai_engine, 'gemini': gemini_engine}
     models = {'openai': openai_model, 'gemini': gemini_model}
-    
+
     engine_aliases = {
         'gpt': 'openai', 'openai': 'openai',
         'gem': 'gemini', 'gemini': 'gemini', 'google': 'gemini'
@@ -143,7 +143,7 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
 
     log_filename_base = session_name or f"multichat_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
     log_filename = os.path.join(config.LOG_DIRECTORY, f"{log_filename_base}.jsonl")
-    
+
     print(f"Starting interactive multi-chat. Primary engine: {primary_engine.name.capitalize()}.")
     print(f"Session log will be saved to: {log_filename}")
     print("Type /help for commands or /exit to end.")

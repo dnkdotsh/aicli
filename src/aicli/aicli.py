@@ -6,9 +6,9 @@
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# but WITHOUT ANY WARRANTY;
+# without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -25,14 +25,15 @@ Main entry point for the application.
 import argparse
 import sys
 import os
+from dotenv import load_dotenv
 
-import api_client
-import handlers
-import utils
-import config
-from settings import settings
-from engine import get_engine
-from logger import log
+from . import api_client
+from . import handlers
+from . import utils
+from . import config
+from .settings import settings
+from .engine import get_engine
+from .logger import log
 
 class CustomHelpFormatter(argparse.RawTextHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
     """Custom formatter for argparse help messages."""
@@ -40,21 +41,28 @@ class CustomHelpFormatter(argparse.RawTextHelpFormatter, argparse.ArgumentDefaul
 
 def main():
     """Parses arguments and orchestrates the application flow."""
+    load_dotenv()
+    # Ensure all required directories exist
+    utils.ensure_dir_exists(config.CONFIG_DIR)
     utils.ensure_dir_exists(config.LOG_DIRECTORY)
     utils.ensure_dir_exists(config.IMAGE_DIRECTORY)
 
-    # If no arguments are provided and we're in an interactive session, start chat directly.
     if len(sys.argv) == 1 and sys.stdin.isatty():
         print(f"Starting interactive chat with default engine ('{settings['default_engine']}')...")
         try:
-            system_prompt = None
-            if settings['memory_enabled']:
-                # Load memory content if the setting is enabled
-                system_prompt, _ = utils.process_files([], settings['memory_enabled'], [])
+            memory_content, attachments_content, _ = utils.process_files([], settings['memory_enabled'], [])
+            
+            system_prompt_parts = []
+            if memory_content:
+                system_prompt_parts.append(memory_content)
+            if attachments_content:
+                system_prompt_parts.append(attachments_content)
+            system_prompt = "\n\n".join(system_prompt_parts) if system_prompt_parts else None
 
             api_key = api_client.check_api_keys(settings['default_engine'])
             engine_instance = get_engine(settings['default_engine'], api_key)
-            model = settings['default_openai_chat_model'] if settings['default_engine'] == 'openai' else settings['default_gemini_model']
+            model_key = 'default_openai_chat_model' if settings['default_engine'] == 'openai' else 'default_gemini_model'
+            model = settings[model_key]
             handlers.handle_chat(engine_instance, model, system_prompt, None, [], None, settings.get('default_max_tokens'), settings.get('stream'), settings['memory_enabled'], False)
         except api_client.MissingApiKeyError as e:
             log.error(e)
@@ -70,7 +78,7 @@ def main():
     mode_group = parser.add_argument_group('Operation Modes')
     context_group = parser.add_argument_group('Context & Input')
     session_group = parser.add_argument_group('Session Control')
-    
+
     exclusive_mode_group = mode_group.add_mutually_exclusive_group()
 
     core_group.add_argument('-e', '--engine', choices=['openai', 'gemini'], default=settings['default_engine'],
@@ -80,10 +88,11 @@ def main():
 
     exclusive_mode_group.add_argument('-c', '--chat', action='store_true', help='Activate chat mode for text generation.')
     exclusive_mode_group.add_argument('-i', '--image', action='store_true', help='Activate image generation mode (OpenAI only).')
-    exclusive_mode_group.add_argument('-b', '--both', nargs='?', const='', type=str, metavar='PROMPT', 
-                                    help='Activate interactive multi-chat mode with both OpenAI and Gemini.\nOptionally provide an initial prompt.')
+    exclusive_mode_group.add_argument('-b', '--both', nargs='?', const='', type=str, metavar='PROMPT',
+                                  help='Activate interactive multi-chat mode with both OpenAI and Gemini.\nOptionally provide an initial prompt.')
 
     context_group.add_argument('-p', '--prompt', type=str, help='Provide a prompt for single-shot chat or image mode.')
+    context_group.add_argument('--system-prompt', type=str, help='Specify a system prompt/instruction from a string or file path.')
     context_group.add_argument('-f', '--file', action='append', help="Attach content from files or directories (can be used multiple times).")
     context_group.add_argument('-x', '--exclude', action='append', help="Exclude a file or directory (can be used multiple times).")
     context_group.add_argument('--memory', action='store_true', help='Force persistent memory on for this session, overriding the default setting.')
@@ -93,7 +102,7 @@ def main():
     session_group.add_argument('--no-stream', action='store_false', dest='stream', help='Disable streaming for chat responses.')
     session_group.add_argument('--max-tokens', type=int, default=settings['default_max_tokens'], help="Set the maximum number of tokens to generate.")
     session_group.add_argument('--debug', action='store_true', help='Start with session-specific debug logging enabled.')
-    
+
     parser.set_defaults(stream=settings['stream'])
     args = parser.parse_args()
 
@@ -103,7 +112,7 @@ def main():
     
     if not sys.stdin.isatty() and not prompt and args.both is None:
         prompt = sys.stdin.read().strip()
-    
+
     if prompt is not None and not prompt.strip():
         parser.error("The provided prompt cannot be empty or contain only whitespace.")
 
@@ -117,15 +126,34 @@ def main():
     if args.image and args.engine != 'openai':
         parser.error("--image mode is only supported by the 'openai' engine.")
 
-    # Default to chat mode if no other mode is specified but other arguments are present
-    if not args.image and args.both is None and (args.prompt or args.file or args.memory or args.session_name):
+    if not args.image and args.both is None and (args.prompt or args.file or args.memory or args.session_name or args.system_prompt):
         args.chat = True
     elif not args.chat and not args.image and args.both is None:
         args.chat = True
 
-    # Determine if memory should be active for this session
     memory_enabled_for_session = settings['memory_enabled'] or args.memory
-    system_prompt, image_data = utils.process_files(args.file, memory_enabled_for_session, args.exclude)
+
+    # Assemble the final system prompt from multiple sources
+    system_prompt_parts = []
+    if args.system_prompt:
+        try:
+            system_prompt_parts.append(utils.read_system_prompt(args.system_prompt))
+        except FileNotFoundError:
+            parser.error(f"The system prompt file '{args.system_prompt}' does not exist.")
+        except IOError as e:
+            parser.error(f"Error reading system prompt file: {e}")
+
+    memory_content, attachments_content, image_data = utils.process_files(
+        args.file, memory_enabled_for_session, args.exclude
+    )
+
+    if memory_content:
+        system_prompt_parts.append(f"--- PERSISTENT MEMORY ---\n{memory_content}")
+
+    if attachments_content:
+        system_prompt_parts.append(f"--- ATTACHED FILES ---\n{attachments_content}")
+
+    system_prompt = "\n\n".join(system_prompt_parts) if system_prompt_parts else None
 
     try:
         if args.both is not None:

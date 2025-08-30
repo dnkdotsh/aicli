@@ -6,9 +6,9 @@
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# but WITHOUT ANY WARRANTY;
+# without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -23,14 +23,19 @@ import requests
 import datetime
 import re
 import copy
-import config
-import utils
-from engine import AIEngine
-from logger import log
-from settings import settings
+
+from . import config
+from . import utils
+from .engine import AIEngine
+from .logger import log
+from .settings import settings
 
 class MissingApiKeyError(Exception):
     """Custom exception for missing API keys."""
+    pass
+
+class ApiRequestError(Exception):
+    """Custom exception for failed API requests."""
     pass
 
 def check_api_keys(engine: str):
@@ -55,9 +60,9 @@ def make_api_request(url: str, headers: dict, payload: dict, stream: bool = Fals
     """
     Makes a POST request to the specified API endpoint and handles errors.
     Returns a dictionary for non-streaming responses or a requests.Response object for streaming.
+    Raises ApiRequestError on failure.
     """
     response_data = None
-    error_info = None
     log_entry = { "timestamp": datetime.datetime.now().isoformat(), "request": {"url": url, "headers": headers, "payload": payload} }
     try:
         response = requests.post(url, headers=headers, json=payload, stream=stream, timeout=settings['api_timeout'])
@@ -67,9 +72,9 @@ def make_api_request(url: str, headers: dict, payload: dict, stream: bool = Fals
             return response
         response_data = response.json()
         if 'error' in response_data:
-            log.error("API Error: %s", response_data['error'].get('message', 'Unknown error'))
-            error_info = response_data['error']
-            return None
+            error_msg = response_data['error'].get('message', 'Unknown API error')
+            log.error("API Error: %s", error_msg)
+            raise ApiRequestError(error_msg)
         return response_data
     except requests.exceptions.HTTPError as e:
         error_details = "No specific error message provided by the API."
@@ -82,19 +87,16 @@ def make_api_request(url: str, headers: dict, payload: dict, stream: bool = Fals
         except json.JSONDecodeError:
             error_details = e.response.text
         log.error("HTTP Request Error: %s\nDETAILS: %s", e, error_details)
-        error_info = {"code": e.response.status_code, "message": error_details}
-        return None
+        raise ApiRequestError(error_details) from e
     except requests.exceptions.RequestException as e:
-        log.error("HTTP Request Error: %s", e)
-        error_info = {"message": str(e)}
-        return None
-    except json.JSONDecodeError:
+        log.error("Request Error: %s", e)
+        raise ApiRequestError(str(e)) from e
+    except json.JSONDecodeError as e:
         log.error("Failed to decode API response.")
-        error_info = {"message": "Failed to decode API response."}
-        return None
+        raise ApiRequestError("Failed to decode API response.") from e
     finally:
         if not stream:
-             log_entry["response"] = response_data or {"error": error_info}
+             log_entry["response"] = response_data or {"error": "Request failed, see logs for details."}
         safe_log_entry = _redact_sensitive_info(log_entry)
         if session_raw_logs is not None:
             session_raw_logs.append(safe_log_entry)
@@ -110,10 +112,15 @@ def perform_chat_request(engine: AIEngine, model: str, messages_or_contents: lis
     payload = engine.build_chat_payload(messages_or_contents, system_prompt, max_tokens, stream, model)
     headers = {"Authorization": f"Bearer {engine.api_key}"} if engine.name == 'openai' else {"Content-Type": "application/json"}
 
-    response_obj = make_api_request(url, headers, payload, stream, session_raw_logs)
-
-    if not response_obj:
+    try:
+        response_obj = make_api_request(url, headers, payload, stream, session_raw_logs)
+    except ApiRequestError as e:
+        # For non-streaming, return the error in the response tuple
+        if not stream:
+            return f"API Error: {e}", {}
+        # For streaming, the error is already logged, so we just return empty
         return "", {}
+
 
     if stream:
         return utils.process_stream(engine.name, response_obj, print_stream=print_stream)

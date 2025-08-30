@@ -6,9 +6,9 @@
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# but WITHOUT ANY WARRANTY;
+# without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -20,7 +20,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import sys
 
-import config
+from . import config
 
 def setup_logger():
     """Configures and returns a project-wide logger."""

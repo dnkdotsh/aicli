@@ -6,9 +6,9 @@
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# but WITHOUT ANY WARRANTY;
+# without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -25,14 +25,14 @@ from prompt_toolkit import prompt
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.formatted_text import ANSI
 
-import config
-import api_client
-import utils
-import handlers
-import settings as app_settings
-from engine import AIEngine
-from logger import log
-from prompts import HISTORY_SUMMARY_PROMPT, MEMORY_INTEGRATION_PROMPT, LOG_RENAMING_PROMPT
+from . import config
+from . import api_client
+from . import utils
+from . import handlers
+from . import settings as app_settings
+from .engine import AIEngine
+from .logger import log
+from .prompts import HISTORY_SUMMARY_PROMPT, MEMORY_INTEGRATION_PROMPT, LOG_RENAMING_PROMPT
 
 @dataclass
 class SessionState:
@@ -64,10 +64,11 @@ def _condense_chat_history(state: SessionState):
 
     summary_text, _ = api_client.perform_chat_request(
         engine=state.engine, model=task_model, messages_or_contents=messages,
-        system_prompt=None, max_tokens=config.SUMMARY_MAX_TOKENS, stream=False
+        system_prompt=None, max_tokens=app_settings.settings['summary_max_tokens'], stream=False
     )
-    if not summary_text:
-        log.warning("History summarization failed. Proceeding with full history.")
+    if not summary_text or summary_text.startswith("API Error:") or summary_text.startswith("Extraction Error:"):
+        reason = summary_text or "No response from helper model."
+        log.warning("History summarization failed. Proceeding with full history. Reason: %s", reason)
         return
 
     summary_message = utils.construct_user_message(state.engine.name, f"[PREVIOUSLY DISCUSSED]:\n{summary_text.strip()}", [])
@@ -130,7 +131,7 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
             print(f"{utils.SYSTEM_MSG}--> Unknown engine: {new_engine_name}. Use 'openai' or 'gemini'.{utils.RESET_COLOR}")
             return False
         try:
-            from engine import get_engine
+            from .engine import get_engine
             new_api_key = api_client.check_api_keys(new_engine_name)
             state.history = utils.translate_history(state.history, new_engine_name)
             state.engine = get_engine(new_engine_name, new_api_key)
@@ -247,66 +248,72 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
                     for entry in initial_state.session_raw_logs:
                         f.write(json.dumps(entry) + '\n')
             except IOError as e:
-                log.warning("Could not write to debug log file: %s", e)
+                log.error("Could not save debug log file: %s", e)
 
 def _update_persistent_memory(engine: AIEngine, model: str, history: list):
-    """Integrates the session history into the persistent memory file in a single step."""
-    try:
-        print(f"{utils.SYSTEM_MSG}--> Integrating session into persistent memory...{utils.RESET_COLOR}")
-        session_content = "\n".join([f"{msg.get('role', 'unknown')}: {utils.extract_text_from_message(msg)}" for msg in history])
-        
-        existing_ltm = ""
-        if os.path.exists(config.PERSISTENT_MEMORY_FILE):
-            with open(config.PERSISTENT_MEMORY_FILE, 'r', encoding='utf-8') as f:
-                existing_ltm = f.read()
+    """Summarizes the session and integrates it into persistent memory."""
+    print(f"{utils.SYSTEM_MSG}--> Updating persistent memory...{utils.RESET_COLOR}")
+    session_content = "\n".join([f"{msg.get('role', 'unknown')}: {utils.extract_text_from_message(msg)}" for msg in history])
+    existing_ltm = ""
+    if os.path.exists(config.PERSISTENT_MEMORY_FILE):
+        with open(config.PERSISTENT_MEMORY_FILE, 'r', encoding='utf-8') as f:
+            existing_ltm = f.read()
 
-        integration_prompt = MEMORY_INTEGRATION_PROMPT.format(
-            existing_ltm=existing_ltm,
-            session_content=session_content
-        )
-        
-        helper_model_key = 'helper_model_openai' if engine.name == 'openai' else 'helper_model_gemini'
-        task_model = app_settings.settings[helper_model_key]
-        messages = [utils.construct_user_message(engine.name, integration_prompt, [])]
-        
-        updated_ltm, _ = api_client.perform_chat_request(engine, task_model, messages, None, config.SUMMARY_MAX_TOKENS, stream=False)
-        
-        if updated_ltm:
+    prompt = MEMORY_INTEGRATION_PROMPT.format(existing_ltm=existing_ltm, session_content=session_content)
+    helper_model_key = 'helper_model_openai' if engine.name == 'openai' else 'helper_model_gemini'
+    task_model = app_settings.settings[helper_model_key]
+    messages = [utils.construct_user_message(engine.name, prompt, [])]
+
+    updated_memory, _ = api_client.perform_chat_request(
+        engine=engine, model=task_model, messages_or_contents=messages,
+        system_prompt=None, max_tokens=app_settings.settings['summary_max_tokens'], stream=False
+    )
+
+    if updated_memory and not updated_memory.startswith("API Error:") and not updated_memory.startswith("Extraction Error:"):
+        try:
             with open(config.PERSISTENT_MEMORY_FILE, 'w', encoding='utf-8') as f:
-                f.write(updated_ltm.strip())
+                f.write(updated_memory.strip())
             print(f"{utils.SYSTEM_MSG}--> Persistent memory updated successfully.{utils.RESET_COLOR}")
-        else:
-            log.warning("Failed to update persistent memory.")
-    except Exception as e:
-        log.error("Error during memory update: %s", e)
+        except IOError as e:
+            log.error("Failed to write to persistent memory file: %s", e)
+    else:
+        reason = updated_memory or "No response from helper model."
+        log.warning("Memory integration failed. Reason: %s", reason)
 
-def rename_session_log(engine: AIEngine, history: list, log_file: str):
-    """Generates a descriptive name for the chat log from its history and renames the file."""
-    print(f"{utils.SYSTEM_MSG}--> Generating smart name for session log...{utils.RESET_COLOR}")
-    try:
-        history_excerpt = history[:40]
-        log_content = "\n".join([f"{msg.get('role', 'unknown')}: {utils.extract_text_from_message(msg)}" for msg in history_excerpt])
+def rename_session_log(engine: AIEngine, history: list, original_filepath: str):
+    """Generates a descriptive name for the session log and renames the file."""
+    print(f"{utils.SYSTEM_MSG}--> Generating descriptive name for session log...{utils.RESET_COLOR}")
+    log_content = "\n".join([f"{msg.get('role', 'unknown')}: {utils.extract_text_from_message(msg)}" for msg in history[:10]]) # Use first 5 turns
+    prompt = LOG_RENAMING_PROMPT.format(log_content=log_content)
+    
+    helper_model_key = 'helper_model_openai' if engine.name == 'openai' else 'helper_model_gemini'
+    task_model = app_settings.settings[helper_model_key]
+    messages = [utils.construct_user_message(engine.name, prompt, [])]
 
-        prompt = LOG_RENAMING_PROMPT.format(log_content=log_content)
-        
-        helper_model_key = 'helper_model_openai' if engine.name == 'openai' else 'helper_model_gemini'
-        task_model = app_settings.settings[helper_model_key]
-        messages = [utils.construct_user_message(engine.name, prompt, [])]
-        
-        new_name, _ = api_client.perform_chat_request(engine, task_model, messages, None, 1024, stream=False)
-        sanitized_name = utils.sanitize_filename(new_name.strip())
-        
-        if sanitized_name:
-            new_filename_base = f"{sanitized_name}.jsonl"
-            new_filepath = os.path.join(config.LOG_DIRECTORY, new_filename_base)
-            counter = 1
-            while os.path.exists(new_filepath):
-                new_filename_base = f"{sanitized_name}_{counter}.jsonl"
-                new_filepath = os.path.join(config.LOG_DIRECTORY, new_filename_base)
-                counter += 1
-            os.rename(log_file, new_filepath)
-            print(f"{utils.SYSTEM_MSG}--> Session log saved as: {new_filepath}{utils.RESET_COLOR}")
-        else:
-            log.warning("Could not generate a valid name. Log remains as: %s", log_file)
-    except (IOError, OSError, Exception) as e:
-        log.warning("Could not rename session log (%s). Log remains as: %s", e, log_file)
+    suggested_name, _ = api_client.perform_chat_request(
+        engine=engine, model=task_model, messages_or_contents=messages,
+        system_prompt=None, max_tokens=app_settings.settings['log_rename_max_tokens'], stream=False
+    )
+
+    if suggested_name and not suggested_name.startswith("API Error:") and not suggested_name.startswith("Extraction Error:"):
+        sanitized_name = utils.sanitize_filename(suggested_name.strip())
+        new_filename = f"{sanitized_name}.jsonl"
+        new_filepath = os.path.join(config.LOG_DIRECTORY, new_filename)
+        try:
+            os.rename(original_filepath, new_filepath)
+            print(f"{utils.SYSTEM_MSG}--> Session log renamed to: {new_filepath}{utils.RESET_COLOR}")
+        except OSError as e:
+            log.error("Failed to rename session log: %s", e)
+    else:
+        reason = suggested_name or "No response from helper model."
+        log.warning("Could not generate a descriptive name for the session log. Reason: %s", reason)
+        # Fallback to rename the log with the error message for easier debugging
+        try:
+            error_name = utils.sanitize_filename(reason)
+            new_filename = f"{error_name}.jsonl"
+            new_filepath = os.path.join(config.LOG_DIRECTORY, new_filename)
+            if not os.path.exists(new_filepath):
+                os.rename(original_filepath, new_filepath)
+                print(f"{utils.SYSTEM_MSG}--> Session log renamed to: {new_filepath}{utils.RESET_COLOR}")
+        except OSError as e:
+            log.error("Failed to rename session log with error message: %s", e)
