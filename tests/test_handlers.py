@@ -248,7 +248,7 @@ def test_secondary_worker_success(mocker):
     mock_perform_chat.assert_called_once_with(
         mock_engine, "gpt-4o-mini", test_history, "system prompt", 100, stream=True, print_stream=False
     )
-    assert result_q.get() == "Secondary response."
+    assert result_q.get() == {'engine_name': 'openai_mock_engine_string', 'cleaned_text': 'Secondary response.'}
 
 def test_secondary_worker_api_error(mocker, caplog):
     """Tests that _secondary_worker handles API errors and puts an error message in the queue."""
@@ -265,7 +265,7 @@ def test_secondary_worker_api_error(mocker, caplog):
         handlers._secondary_worker(mock_engine, "gpt-4o-mini", test_history, "system prompt", 100, result_q)
 
     mock_perform_chat.assert_called_once()
-    assert result_q.get() == "Error: Could not get response from openai_mock_engine_string."
+    assert result_q.get() == {'engine_name': 'openai_mock_engine_string', 'cleaned_text': 'Error: Could not get response from openai_mock_engine_string.'}
     assert ("aicli", logging.ERROR, "Secondary model thread failed: API Call Failed") in caplog.record_tuples
 
 
@@ -297,7 +297,7 @@ class TestMultiChatHandlers:
         self.mock_thread = mocker.patch('threading.Thread', side_effect=mock_thread_constructor)
 
         self.mock_queue = mocker.patch('queue.Queue')
-        self.mock_queue.return_value.get.return_value = "Secondary AI Response"
+        self.mock_queue.return_value.get.return_value = {'engine_name': 'gemini', 'cleaned_text': 'Secondary AI Response'}
         self.mock_log_file = mocker.patch('builtins.open', mocker.mock_open())
 
         _original_os_path_join = os.path.join
@@ -324,7 +324,8 @@ class TestMultiChatHandlers:
         assert args[0].name == 'openai'
         assert "Hello multi-chat" in args[2][0]['content'][0]['text']
         assert "Global system prompt" in args[3]
-        assert "You are OpenAI." in args[3]
+        # PyEvolve Change: Update assertion to match full system prompt
+        assert "You are OpenAI only." in args[3]
 
         self.mock_secondary_worker.assert_called_once()
         args, kwargs = self.mock_secondary_worker.call_args
@@ -351,7 +352,8 @@ class TestMultiChatHandlers:
         args, kwargs = self.mock_perform_chat.call_args
         assert args[0].name == 'openai'
         assert "Director to All: Test broadcast prompt" in args[2][-1]['content'][0]['text']
-        assert "You are OpenAI." in args[3]
+        # PyEvolve Change: Update assertion to match full system prompt
+        assert "You are OpenAI only." in args[3]
 
         self.mock_secondary_worker.assert_called_once()
         args, kwargs = self.mock_secondary_worker.call_args
