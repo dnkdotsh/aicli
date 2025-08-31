@@ -40,18 +40,16 @@ from .logger import log
 from .prompts import (MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI,
                      CONTINUATION_PROMPT)
 
-def _format_multichat_response(engine_name: str, raw_response: str) -> str:
+def _clean_ai_response_text(engine_name: str, raw_response: str) -> str:
     """
-    Formats an AI's raw response for multi-chat, stripping any self-labels the AI
-    might have added despite system prompts, and then prepending the client's
-    controlled label.
+    Strips any self-labels the AI might have added despite system prompts,
+    returning only the cleaned response text without any client-side prefix.
     """
-    client_prefix = f"[{engine_name.capitalize()}]: "
     # Regex to match leading AI-generated labels (e.g., "[Openai]:", "[Gemini]:", possibly with optional colon and whitespace)
     # This pattern accounts for variations in spacing and capitalization.
     ai_label_pattern = re.compile(r"^\[" + re.escape(engine_name.capitalize()) + r"\]:?\s*", re.IGNORECASE)
     cleaned_response = ai_label_pattern.sub("", raw_response.lstrip())
-    return client_prefix + cleaned_response
+    return cleaned_response
 
 def select_model(engine: AIEngine, task: str) -> str:
     """Allows the user to select a model or use the default."""
@@ -164,13 +162,13 @@ def _secondary_worker(engine, model, history, system_prompt, max_tokens, result_
         response_text, _ = api_client.perform_chat_request(
             engine, model, history, system_prompt, max_tokens, stream=True, print_stream=False
         )
-        # Apply formatting before putting into queue
-        formatted_response = _format_multichat_response(engine.name, response_text)
-        result_queue.put(formatted_response)
+        # Clean the AI's response text (strip self-labels) before putting into queue
+        cleaned_response_text = _clean_ai_response_text(engine.name, response_text)
+        result_queue.put({'engine_name': engine.name, 'cleaned_text': cleaned_response_text})
     except Exception as e:
         log.error("Secondary model thread failed: %s", e)
         # Ensure that engine.name always returns a string, not a MagicMock object, in tests.
-        result_queue.put(f"Error: Could not get response from {engine.name}.")
+        result_queue.put({'engine_name': engine.name, 'cleaned_text': f"Error: Could not get response from {engine.name}."})
 
 def handle_multichat_session(initial_prompt: str | None, system_prompt: str, image_data: list, session_name: str, max_tokens: int, debug_enabled: bool):
     """Manages an interactive session with both OpenAI and Gemini."""
@@ -248,8 +246,10 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
             raw_response, _ = api_client.perform_chat_request(target_engine, target_model, current_history, final_sys_prompts[target_engine_name], max_tokens, stream=True)
             print() # Ensure a newline after streamed output
 
-            formatted_response = _format_multichat_response(target_engine.name, raw_response)
-            asst_msg = utils.construct_assistant_message('openai', formatted_response)
+            # Clean the AI's response text and then format with client-controlled prefix for history
+            cleaned_response_text = _clean_ai_response_text(target_engine.name, raw_response)
+            formatted_response_for_history = f"[{target_engine.name.capitalize()}]: {cleaned_response_text}"
+            asst_msg = utils.construct_assistant_message('openai', formatted_response_for_history)
             shared_history.extend([utils.construct_user_message('openai', user_msg_text, []), asst_msg])
 
         # Handle regular messages for broadcast
@@ -268,27 +268,48 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
             )
             secondary_thread.start()
 
+            # --- Primary AI (streaming output) ---
             print(f"\n{utils.ASSISTANT_PROMPT}[{primary_engine.name.capitalize()}]: {utils.RESET_COLOR}", end='', flush=True)
-            # Stream the *raw* primary response, then format the full response later for history
             primary_response_streamed, _ = api_client.perform_chat_request(primary_engine, models[primary_engine.name], history_for_primary, final_sys_prompts[primary_engine.name], max_tokens, stream=True)
             print() # CRITICAL FIX: Ensure a newline after the streamed content
 
-            secondary_thread.join()
-            secondary_response_formatted = result_queue.get() # Already formatted by _secondary_worker
+            # Add extra newline between AI responses as requested
+            print()
 
-            print(f"{utils.ASSISTANT_PROMPT}{secondary_response_formatted}{utils.RESET_COLOR}")
+            # --- Secondary AI (block-printed output) ---
+            secondary_thread.join() # Wait for the secondary AI response to complete
+            secondary_result = result_queue.get() # Get the dict: {'engine_name': ..., 'cleaned_text': ...}
+            secondary_engine_name = secondary_result['engine_name']
+            secondary_response_cleaned_text = secondary_result['cleaned_text']
 
-            formatted_primary_response = _format_multichat_response(primary_engine.name, primary_response_streamed)
+            # Print secondary AI response with green prefix, default text color
+            print(f"{utils.ASSISTANT_PROMPT}[{secondary_engine_name.capitalize()}]: {utils.RESET_COLOR}{secondary_response_cleaned_text}")
 
-            primary_msg = utils.construct_assistant_message('openai', formatted_primary_response)
-            secondary_msg = utils.construct_assistant_message('openai', secondary_response_formatted) # Already formatted
+            # Construct history messages using the *cleaned* text, prefixed for internal consistency
+            formatted_primary_response_for_history = f"[{primary_engine.name.capitalize()}]: { _clean_ai_response_text(primary_engine.name, primary_response_streamed) }"
+            formatted_secondary_response_for_history = f"[{secondary_engine_name.capitalize()}]: {secondary_response_cleaned_text}"
+
+            primary_msg = utils.construct_assistant_message('openai', formatted_primary_response_for_history)
+            secondary_msg = utils.construct_assistant_message('openai', formatted_secondary_response_for_history)
 
             first_msg, second_msg = (primary_msg, secondary_msg) if primary_engine_name == 'openai' else (secondary_msg, primary_msg)
             shared_history.extend([user_msg_for_history, first_msg, second_msg])
 
         try:
             with open(log_filename, 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"turn": turn_counter, "history_slice": shared_history[-3:] if not prompt_text.lower().strip().startswith('/ai') else shared_history[-2:]}) + '\n')
+                # Log the history slice with client-formatted responses for clarity in logs
+                log_history_slice = []
+                # User prompt
+                log_history_slice.append(shared_history[-3] if not prompt_text.lower().strip().startswith('/ai') else shared_history[-2])
+                # AI responses (take from the formatted ones directly)
+                if not prompt_text.lower().strip().startswith('/ai'):
+                    log_history_slice.append(primary_msg) # Primary AI's formatted message
+                    log_history_slice.append(secondary_msg) # Secondary AI's formatted message
+                else:
+                    log_history_slice.append(asst_msg) # Targeted AI's formatted message
+
+                f.write(json.dumps({"turn": turn_counter, "history_slice": log_history_slice}) + '\n')
+
         except IOError as e:
             log.warning("Could not write to session log file: %s", e)
 

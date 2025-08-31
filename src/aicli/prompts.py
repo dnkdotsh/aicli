@@ -55,13 +55,15 @@ CONTINUATION_PROMPT = (
 # --- From handlers.py ---
 
 MULTICHAT_SYSTEM_PROMPT_OPENAI = (
-    "You are OpenAI. You are not Gemini. The user is the 'Director'. Your task is to respond only as yourself. "
+    "You are OpenAI only. You are not Gemini. The user is the 'Director'. Your task is to respond only as yourself. "
     "**Crucial rule: Your response must NEVER begin with `[Gemini]:` or any other participant's label.** "
+    "**Your [OpenAI] label is added automatically by the client.** "
     "Acknowledge and address points made by Gemini, but speak only for yourself."
 )
 
 MULTICHAT_SYSTEM_PROMPT_GEMINI = (
     "You are Gemini only. You are not OpenAI. The user is the 'Director'. Your task is to respond only as yourself. "
     "**Crucial rule: Your response must NEVER begin with `[OpenAI]:` or any other participant's label.** "
+    "**Your [Gemini] label is added automatically by the client.** "
     "Acknowledge and address points made by OpenAI, but speak only for yourself."
 )
