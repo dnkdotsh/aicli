@@ -28,6 +28,7 @@ import copy
 from prompt_toolkit import prompt
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.formatted_text import ANSI
+import re # Added for regex for _format_multichat_response
 
 from . import config
 from . import api_client
@@ -38,6 +39,19 @@ from .settings import settings
 from .logger import log
 from .prompts import (MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI,
                      CONTINUATION_PROMPT)
+
+def _format_multichat_response(engine_name: str, raw_response: str) -> str:
+    """
+    Formats an AI's raw response for multi-chat, stripping any self-labels the AI
+    might have added despite system prompts, and then prepending the client's
+    controlled label.
+    """
+    client_prefix = f"[{engine_name.capitalize()}]: "
+    # Regex to match leading AI-generated labels (e.g., "[Openai]:", "[Gemini]:", possibly with optional colon and whitespace)
+    # This pattern accounts for variations in spacing and capitalization.
+    ai_label_pattern = re.compile(r"^\[" + re.escape(engine_name.capitalize()) + r"\]:?\s*", re.IGNORECASE)
+    cleaned_response = ai_label_pattern.sub("", raw_response.lstrip())
+    return client_prefix + cleaned_response
 
 def select_model(engine: AIEngine, task: str) -> str:
     """Allows the user to select a model or use the default."""
@@ -146,10 +160,13 @@ def handle_load_session(filepath_str: str):
 def _secondary_worker(engine, model, history, system_prompt, max_tokens, result_queue):
     """A worker function to be run in a thread for the secondary model."""
     try:
+        # Perform chat request, do NOT print stream here
         response_text, _ = api_client.perform_chat_request(
             engine, model, history, system_prompt, max_tokens, stream=True, print_stream=False
         )
-        result_queue.put(response_text)
+        # Apply formatting before putting into queue
+        formatted_response = _format_multichat_response(engine.name, response_text)
+        result_queue.put(formatted_response)
     except Exception as e:
         log.error("Secondary model thread failed: %s", e)
         # Ensure that engine.name always returns a string, not a MagicMock object, in tests.
@@ -227,12 +244,12 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
             current_history = utils.translate_history(shared_history + [user_msg], target_engine.name)
 
             print(f"\n{utils.ASSISTANT_PROMPT}[{target_engine.name.capitalize()}]: {utils.RESET_COLOR}", end='', flush=True)
-            response_text, _ = api_client.perform_chat_request(target_engine, target_model, current_history, final_sys_prompts[target_engine_name], max_tokens, stream=True)
+            # Perform chat request, streaming to stdout. The raw_response will capture the full stream.
+            raw_response, _ = api_client.perform_chat_request(target_engine, target_model, current_history, final_sys_prompts[target_engine_name], max_tokens, stream=True)
+            print() # Ensure a newline after streamed output
 
-            prefix = f"[{target_engine.name.capitalize()}]: "
-            asst_msg_text = response_text if response_text.lstrip().startswith(prefix) else f"{prefix}{response_text}"
-
-            asst_msg = utils.construct_assistant_message('openai', asst_msg_text)
+            formatted_response = _format_multichat_response(target_engine.name, raw_response)
+            asst_msg = utils.construct_assistant_message('openai', formatted_response)
             shared_history.extend([utils.construct_user_message('openai', user_msg_text, []), asst_msg])
 
         # Handle regular messages for broadcast
@@ -252,21 +269,19 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
             secondary_thread.start()
 
             print(f"\n{utils.ASSISTANT_PROMPT}[{primary_engine.name.capitalize()}]: {utils.RESET_COLOR}", end='', flush=True)
-            primary_response, _ = api_client.perform_chat_request(primary_engine, models[primary_engine.name], history_for_primary, final_sys_prompts[primary_engine.name], max_tokens, stream=True)
+            # Stream the *raw* primary response, then format the full response later for history
+            primary_response_streamed, _ = api_client.perform_chat_request(primary_engine, models[primary_engine.name], history_for_primary, final_sys_prompts[primary_engine.name], max_tokens, stream=True)
+            print() # CRITICAL FIX: Ensure a newline after the streamed content
 
             secondary_thread.join()
-            secondary_response = result_queue.get()
+            secondary_response_formatted = result_queue.get() # Already formatted by _secondary_worker
 
-            print(f"\n{utils.ASSISTANT_PROMPT}[{secondary_engine.name.capitalize()}]: {utils.RESET_COLOR}{secondary_response}")
+            print(f"{utils.ASSISTANT_PROMPT}{secondary_response_formatted}{utils.RESET_COLOR}")
 
-            primary_prefix = f"[{primary_engine.name.capitalize()}]: "
-            primary_response_text = primary_response if primary_response.lstrip().startswith(primary_prefix) else f"{primary_prefix}{primary_response}"
+            formatted_primary_response = _format_multichat_response(primary_engine.name, primary_response_streamed)
 
-            secondary_prefix = f"[{secondary_engine.name.capitalize()}]: "
-            secondary_response_text = secondary_response if secondary_response.lstrip().startswith(secondary_prefix) else f"{secondary_prefix}{secondary_response}"
-
-            primary_msg = utils.construct_assistant_message('openai', primary_response_text)
-            secondary_msg = utils.construct_assistant_message('openai', secondary_response_text)
+            primary_msg = utils.construct_assistant_message('openai', formatted_primary_response)
+            secondary_msg = utils.construct_assistant_message('openai', secondary_response_formatted) # Already formatted
 
             first_msg, second_msg = (primary_msg, secondary_msg) if primary_engine_name == 'openai' else (secondary_msg, primary_msg)
             shared_history.extend([user_msg_for_history, first_msg, second_msg])
