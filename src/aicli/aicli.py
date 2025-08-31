@@ -88,7 +88,12 @@ def run_chat_command(args):
     if is_single_shot:
         memory_enabled_for_session = False
 
-    # Assemble the final system prompt from multiple sources
+    # Process files and memory into their respective components
+    memory_content, attachments, image_data = utils.process_files(
+        args.file, memory_enabled_for_session, args.exclude
+    )
+
+    # Assemble the base system prompt (user-provided + memory)
     system_prompt_parts = []
     if args.system_prompt:
         try:
@@ -97,15 +102,8 @@ def run_chat_command(args):
             print(f"Error reading system prompt file: {e}", file=sys.stderr)
             sys.exit(1)
 
-    memory_content, attachments_content, image_data, processed_text_files = utils.process_files(
-        args.file, memory_enabled_for_session, args.exclude
-    )
-
     if memory_content:
         system_prompt_parts.append(f"--- PERSISTENT MEMORY ---\n{memory_content}")
-
-    if attachments_content:
-        system_prompt_parts.append(f"--- ATTACHED FILES ---\n{attachments_content}")
 
     system_prompt = "\n\n".join(system_prompt_parts) if system_prompt_parts else None
 
@@ -114,13 +112,23 @@ def run_chat_command(args):
         if args.load:
             handlers.handle_load_session(args.load)
         elif args.both is not None:
-            handlers.handle_multichat_session(prompt, system_prompt, image_data, args.session_name, args.max_tokens, args.debug)
+            # For multichat, we pre-assemble the file context into the prompt
+            attachment_texts = []
+            for path, content in attachments.items():
+                attachment_texts.append(f"--- FILE: {path.as_posix()} ---\n{content}")
+            attachments_str = "\n\n".join(attachment_texts)
+
+            full_system_prompt = system_prompt
+            if attachments_str:
+                full_system_prompt = (full_system_prompt or "") + f"\n\n--- ATTACHED FILES ---\n{attachments_str}"
+
+            handlers.handle_multichat_session(prompt, full_system_prompt, image_data, args.session_name, args.max_tokens, args.debug)
         elif args.chat:
             api_key = api_client.check_api_keys(args.engine)
             engine_instance = get_engine(args.engine, api_key)
             model_key = 'default_openai_chat_model' if args.engine == 'openai' else 'default_gemini_model'
             model = args.model or settings[model_key]
-            handlers.handle_chat(engine_instance, model, system_prompt, prompt, image_data, processed_text_files, args.session_name, args.max_tokens, args.stream, memory_enabled_for_session, args.debug)
+            handlers.handle_chat(engine_instance, model, system_prompt, prompt, image_data, attachments, args.session_name, args.max_tokens, args.stream, memory_enabled_for_session, args.debug)
         elif args.image:
             api_key = api_client.check_api_keys(args.engine)
             engine_instance = get_engine(args.engine, api_key)
@@ -197,7 +205,25 @@ def main():
         if not args_list and sys.stdin.isatty():
              # Mimic the original no-arg behavior
              print(f"Starting interactive chat with default engine ('{settings['default_engine']}')...")
-             handlers.handle_chat(get_engine(settings['default_engine'], api_client.check_api_keys(settings['default_engine'])), settings['default_gemini_model'], None, None, [], [], None, None, True, settings['memory_enabled'], False)
+             # PyEvolve Change: Load persistent memory and attachments for default interactive mode
+             memory_content, attachments, _ = utils.process_files(None, settings['memory_enabled'], None)
+             system_prompt_for_interactive = None
+             if memory_content:
+                 system_prompt_for_interactive = f"--- PERSISTENT MEMORY ---\n{memory_content}"
+
+             handlers.handle_chat(
+                 get_engine(settings['default_engine'], api_client.check_api_keys(settings['default_engine'])),
+                 settings['default_gemini_model'],
+                 system_prompt_for_interactive,  # Pass loaded system prompt
+                 None,                           # No initial prompt for interactive mode
+                 [],                             # No initial image data
+                 attachments,                    # Pass loaded attachments (will be empty dict for no-arg mode)
+                 None,
+                 None,
+                 True,
+                 settings['memory_enabled'],
+                 False
+             )
         else:
              run_chat_command(args)
 

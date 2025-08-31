@@ -53,13 +53,27 @@ class SessionState:
     system_prompt: str | None
     max_tokens: int | None
     memory_enabled: bool
-    initial_image_data: list = field(default_factory=list)
-    attached_text_files: list = field(default_factory=list) # Stores Path objects of text files
+    attachments: dict = field(default_factory=dict) # Maps Path object to file content string
+    attached_images: list = field(default_factory=list)
     history: list = field(default_factory=list)
     debug_active: bool = False
     stream_active: bool = True
     session_raw_logs: list = field(default_factory=list)
     exit_without_memory: bool = False
+
+def _assemble_full_system_prompt(state: SessionState) -> str | None:
+    """Combines base system prompt and attachments into a single string for the API."""
+    prompt_parts = []
+    if state.system_prompt:
+        prompt_parts.append(state.system_prompt)
+
+    if state.attachments:
+        attachment_texts = []
+        for path, content in state.attachments.items():
+            attachment_texts.append(f"--- FILE: {path.as_posix()} ---\n{content}")
+        prompt_parts.append(f"--- ATTACHED FILES ---\n" + "\n\n".join(attachment_texts))
+
+    return "\n\n".join(prompt_parts) if prompt_parts else None
 
 def _generate_session_name(engine: AIEngine, history: list) -> str | None:
     """Generates a descriptive name for the session using an AI model."""
@@ -94,8 +108,8 @@ def _save_session_to_file(state: SessionState, filename: str) -> bool:
     state_dict = asdict(state)
     state_dict['engine_name'] = state.engine.name
     del state_dict['engine']
-    # Convert Path objects to strings for JSON serialization
-    state_dict['attached_text_files'] = [str(p) for p in state.attached_text_files]
+    # Convert Path objects in attachment keys to strings for JSON serialization
+    state_dict['attachments'] = {str(k): v for k, v in state.attachments.items()}
 
 
     try:
@@ -118,9 +132,14 @@ def load_session_from_file(filepath: Path) -> SessionState | None:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
-        # Convert file paths back to Path objects
+        # Convert string keys in attachments back to Path objects
+        if 'attachments' in data:
+            data['attachments'] = {Path(k): v for k, v in data['attachments'].items()}
+        # Gracefully handle migration from old session formats
         if 'attached_text_files' in data:
-            data['attached_text_files'] = [Path(p) for p in data['attached_text_files']]
+            del data['attached_text_files']
+        if 'initial_image_data' in data:
+            data['attached_images'] = data.pop('initial_image_data')
 
         engine_name = data.pop('engine_name')
         api_key = api_client.check_api_keys(engine_name)
@@ -251,16 +270,16 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
         print(f"  Memory Enabled (on exit): {'On' if state.memory_enabled else 'Off'}")
         print(f"  Debug Logging: {'On' if state.debug_active else 'Off'}")
         print(f"  System Prompt: {'Active' if state.system_prompt else 'None'}")
-        if state.attached_text_files:
+        if state.attachments:
             print("\n  Attached Text Files:")
-            for p in state.attached_text_files:
+            for p in state.attachments.keys():
                 try:
                     size = p.stat().st_size
                     print(f"    - {p.name} ({_format_bytes(size)})")
                 except FileNotFoundError:
                     print(f"    - {p.name} (File not found)")
-        if state.initial_image_data:
-             print(f"\n  Attached Images: {len(state.initial_image_data)}")
+        if state.attached_images:
+             print(f"\n  Attached Images: {len(state.attached_images)}")
 
     elif command == '/set':
         if len(args) == 2:
@@ -306,13 +325,52 @@ def _handle_slash_command(user_input: str, state: SessionState) -> bool:
                 state.system_prompt = new_state.system_prompt
                 state.max_tokens = new_state.max_tokens
                 state.memory_enabled = new_state.memory_enabled
-                state.initial_image_data = new_state.initial_image_data
+                state.attached_images = new_state.attached_images
                 state.history = new_state.history
                 state.debug_active = new_state.debug_active
                 state.stream_active = new_state.stream_active
-                state.attached_text_files = new_state.attached_text_files
+                state.attachments = new_state.attachments
         else:
             print(f"{utils.SYSTEM_MSG}--> Usage: /load <filename>{utils.RESET_COLOR}")
+
+    elif command == '/refresh':
+        updated_files = []
+        files_to_remove = []
+
+        if not args: # Global refresh
+            if not state.attachments:
+                print(f"{utils.SYSTEM_MSG}--> No files attached to refresh.{utils.RESET_COLOR}")
+                return False
+            paths_to_refresh = list(state.attachments.keys())
+        else: # Targeted refresh
+            search_term = ' '.join(args)
+            paths_to_refresh = [p for p in state.attachments.keys() if search_term in p.name]
+            if not paths_to_refresh:
+                print(f"{utils.SYSTEM_MSG}--> No attached files found matching '{search_term}'.{utils.RESET_COLOR}")
+                return False
+
+        for path in paths_to_refresh:
+            try:
+                # Skip zip files as they are not individually refreshable with this method
+                if path.suffix.lower() == '.zip':
+                    continue
+                with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                    state.attachments[path] = f.read()
+                updated_files.append(path.name)
+            except (IOError, FileNotFoundError) as e:
+                log.warning("Could not re-read '%s': %s. Removing from context.", path.name, e)
+                print(f"{utils.SYSTEM_MSG}--> Warning: Could not re-read '{path.name}'. Removing from session.{utils.RESET_COLOR}")
+                files_to_remove.append(path)
+
+        for path in files_to_remove:
+            del state.attachments[path]
+
+        if updated_files:
+            print(f"{utils.SYSTEM_MSG}--> Refreshed {len(updated_files)} file(s): {', '.join(updated_files)}{utils.RESET_COLOR}")
+            notification_text = f"[SYSTEM] The content of the following attached file(s) has been updated: {', '.join(updated_files)}. Please use this new information for subsequent answers."
+            notification_msg = utils.construct_user_message(state.engine.name, notification_text, [])
+            state.history.append(notification_msg)
+            print(f"{utils.SYSTEM_MSG}--> Notified AI of the context update.{utils.RESET_COLOR}")
 
     else:
         print(f"{utils.SYSTEM_MSG}--> Unknown command: {command}. Type /help for a list of commands.{utils.RESET_COLOR}")
@@ -331,15 +389,15 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
     print(f"Session log will be saved to: {log_filename}")
 
     if initial_state.system_prompt: print(f"{utils.SYSTEM_MSG}System prompt is active.{utils.RESET_COLOR}")
-    if initial_state.attached_text_files:
+    if initial_state.attachments:
         print(f"{utils.SYSTEM_MSG}Attached Text Files:{utils.RESET_COLOR}")
-        for p in initial_state.attached_text_files:
+        for p in initial_state.attachments.keys():
              try:
                  size = p.stat().st_size
                  print(f"  - {p.name} ({_format_bytes(size)})")
              except FileNotFoundError:
                  print(f"  - {p.name} (File not found)")
-    if initial_state.initial_image_data: print(f"{utils.SYSTEM_MSG}Attached {len(initial_state.initial_image_data)} image(s) to this session.{utils.RESET_COLOR}")
+    if initial_state.attached_images: print(f"{utils.SYSTEM_MSG}Attached {len(initial_state.attached_images)} image(s) to this session.{utils.RESET_COLOR}")
     if initial_state.memory_enabled: print(f"{utils.SYSTEM_MSG}Persistent memory is enabled for this session.{utils.RESET_COLOR}")
 
 
@@ -360,7 +418,7 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
                     break
                 continue
 
-            user_msg = utils.construct_user_message(initial_state.engine.name, user_input, initial_state.initial_image_data if first_turn else [])
+            user_msg = utils.construct_user_message(initial_state.engine.name, user_input, initial_state.attached_images if first_turn else [])
             messages_or_contents = list(initial_state.history)
             messages_or_contents.append(user_msg)
             srl_list = initial_state.session_raw_logs if initial_state.debug_active else None
@@ -368,9 +426,10 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
             if initial_state.stream_active:
                 print(f"\n{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}", end='', flush=True)
 
+            full_system_prompt = _assemble_full_system_prompt(initial_state)
             response_text, token_dict = api_client.perform_chat_request(
                 engine=initial_state.engine, model=initial_state.model,
-                messages_or_contents=messages_or_contents, system_prompt=initial_state.system_prompt,
+                messages_or_contents=messages_or_contents, system_prompt=full_system_prompt,
                 max_tokens=initial_state.max_tokens, stream=initial_state.stream_active, session_raw_logs=srl_list
             )
             if not initial_state.stream_active:

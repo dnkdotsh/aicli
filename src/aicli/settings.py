@@ -39,8 +39,8 @@ def _get_default_settings():
         "stream": True,
         "memory_enabled": True,
         "default_max_tokens": 4096,
-        "summary_max_tokens": 2048,
-        "log_rename_max_tokens": 1024,
+        "summary_max_tokens": 4096,
+        "log_rename_max_tokens": 2048,
     }
 
 def _load_settings():
@@ -64,11 +64,11 @@ def save_setting(key: str, value: str):
         return
 
     current_settings = _load_settings()
-    
+
     # Attempt to convert value to a more appropriate type
     original_type = type(_get_default_settings().get(key))
     converted_value = value
-    
+
     if original_type == bool:
         if value.lower() in ['true', 'yes', '1']: converted_value = True
         elif value.lower() in ['false', 'no', '0']: converted_value = False
@@ -81,13 +81,13 @@ def save_setting(key: str, value: str):
         except ValueError:
             print(f"{utils.SYSTEM_MSG}--> Invalid integer value: {value}.{utils.RESET_COLOR}")
             return
-    
+
     current_settings[key] = converted_value
-    
+
     # Prune any settings that are no longer in the defaults
     default_keys = _get_default_settings().keys()
     user_settings_to_save = {k: v for k, v in current_settings.items() if k in default_keys and k != 'version'}
-    
+
     try:
         # Ensure the parent directory exists before writing
         utils.ensure_dir_exists(config.CONFIG_DIR)

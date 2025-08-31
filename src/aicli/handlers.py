@@ -54,7 +54,7 @@ def select_model(engine: AIEngine, task: str) -> str:
     print("Fetching available models...")
     models = engine.fetch_available_models(task)
     if not models:
-        print(f"Using default: {default_model}", file=sys.stderr)
+        print(f"Using default: {default_model}")
         return default_model
 
     print("\nPlease select a model:")
@@ -73,14 +73,24 @@ def select_model(engine: AIEngine, task: str) -> str:
     print(f"Invalid selection. Using default: {default_model}")
     return default_model
 
-def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt: str, image_data: list, processed_text_files: list, session_name: str, max_tokens: int, stream: bool, memory_enabled: bool, debug_enabled: bool):
+def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt: str, image_data: list, attachments: dict, session_name: str, max_tokens: int, stream: bool, memory_enabled: bool, debug_enabled: bool):
     """Handles both single-shot and interactive chat sessions."""
     if initial_prompt:
+        # For single-shot chat, we must pre-assemble the full system prompt
+        attachment_texts = []
+        for path, content in attachments.items():
+            attachment_texts.append(f"--- FILE: {path.as_posix()} ---\n{content}")
+        attachments_str = "\n\n".join(attachment_texts)
+
+        full_system_prompt = system_prompt
+        if attachments_str:
+            full_system_prompt = (full_system_prompt or "") + f"\n\n--- ATTACHED FILES ---\n{attachments_str}"
+
         # Handle single-shot chat
         messages_or_contents = [utils.construct_user_message(engine.name, initial_prompt, image_data)]
         if stream:
              print(f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}", end='', flush=True)
-        response, token_dict = api_client.perform_chat_request(engine, model, messages_or_contents, system_prompt, max_tokens, stream)
+        response, token_dict = api_client.perform_chat_request(engine, model, messages_or_contents, full_system_prompt, max_tokens, stream)
         if not stream:
             print(f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}{response}", end='')
         print(utils.format_token_string(token_dict))
@@ -90,8 +100,8 @@ def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt
             engine=engine,
             model=model,
             system_prompt=system_prompt,
-            initial_image_data=image_data,
-            attached_text_files=processed_text_files,
+            attached_images=image_data,
+            attachments=attachments,
             stream_active=stream,
             memory_enabled=memory_enabled,
             debug_active=debug_enabled,
@@ -118,9 +128,15 @@ def handle_load_session(filepath_str: str):
     if filepath.suffix != '.json':
         filepath = filepath.with_suffix('.json')
 
-    initial_state = load_session_from_file(filepath)
+    try:
+        initial_state = load_session_from_file(filepath)
+    except api_client.MissingApiKeyError as e:
+        log.error(e)
+        sys.exit(1)
 
     if not initial_state:
+        # This branch handles other load failures (e.g., file not found, JSON error)
+        # that are logged by load_session_from_file itself.
         sys.exit(1)
 
     # Use the loaded file's name as the base for the new session log
@@ -136,6 +152,7 @@ def _secondary_worker(engine, model, history, system_prompt, max_tokens, result_
         result_queue.put(response_text)
     except Exception as e:
         log.error("Secondary model thread failed: %s", e)
+        # Ensure that engine.name always returns a string, not a MagicMock object, in tests.
         result_queue.put(f"Error: Could not get response from {engine.name}.")
 
 def handle_multichat_session(initial_prompt: str | None, system_prompt: str, image_data: list, session_name: str, max_tokens: int, debug_enabled: bool):
@@ -145,7 +162,7 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
         gemini_key = api_client.check_api_keys('gemini')
     except api_client.MissingApiKeyError as e:
         log.error(e)
-        return
+        sys.exit(1) # Exit if API key is missing
 
     openai_engine = get_engine('openai', openai_key)
     gemini_engine = get_engine('gemini', gemini_key)

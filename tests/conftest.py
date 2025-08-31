@@ -5,11 +5,21 @@ Fixtures defined here are automatically available to all test functions.
 """
 
 import pytest
+import os
+import io
+import sys
+import logging
 from unittest.mock import MagicMock
 from pyfakefs.fake_filesystem_unittest import Patcher
 
 from aicli.engine import OpenAIEngine, GeminiEngine, AIEngine
 from aicli.session_manager import SessionState
+from aicli import config # Import config to access LOG_DIRECTORY
+
+# Configure caplog to capture the 'aicli' logger
+# This hook ensures the logger is configured before tests run
+def pytest_configure(config):
+    logging.getLogger("aicli").propagate = True
 
 @pytest.fixture
 def mock_openai_engine():
@@ -40,8 +50,17 @@ def fake_fs():
     Initializes a fake filesystem using pyfakefs for tests that
     require filesystem interactions (e.g., reading/writing settings,
     sessions, logs).
+    Ensures core application directories exist in the fake filesystem.
     """
     with Patcher() as patcher:
+        # Only ensure the base config and data directories exist.
+        # Subdirectories like logs/, images/, sessions/ will be created
+        # by the application's ensure_dir_exists calls (e.g. in aicli.main)
+        # or by specific tests that require them, preventing FileExistsError.
+        config.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        config.LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+        config.IMAGE_DIRECTORY.mkdir(parents=True, exist_ok=True)
         yield patcher.fs
 
 @pytest.fixture
@@ -92,6 +111,34 @@ def mock_gemini_chat_response():
         "usageMetadata": {
             "promptTokenCount": 15,
             "candidatesTokenCount": 25,
-            "totalTokenCount": 40
+            "totalTokenCount": 40,
+            "cachedContentTokenCount": 5
         }
+    }
+
+@pytest.fixture
+def mock_prompt_toolkit(mocker):
+    """
+    Mocks prompt_toolkit.prompt and underlying sys.stdin interactions
+    to avoid EOFError in interactive tests.
+    It provides an input_queue for tests to push expected inputs into.
+    """
+    input_queue = []
+
+    # Mock sys.stdin.isatty to make prompt_toolkit think it's an interactive terminal.
+    mocker.patch('sys.stdin.isatty', return_value=True)
+
+    # Patch prompt_toolkit.prompt where it is USED (in the handlers module).
+    def _mocked_prompt_side_effect(message="", **kwargs):
+        if not input_queue:
+            # When the queue is empty, raise EOFError to simulate the user
+            # pressing Ctrl+D, allowing loops to terminate gracefully.
+            raise EOFError
+        return input_queue.pop(0)
+
+    mock_prompt_func = mocker.patch('aicli.handlers.prompt', side_effect=_mocked_prompt_side_effect)
+
+    return {
+        'prompt': mock_prompt_func,
+        'input_queue': input_queue # Tests will populate this list
     }

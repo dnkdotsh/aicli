@@ -24,6 +24,7 @@ import re
 import datetime
 import zipfile
 import mimetypes
+import requests # Added for requests.exceptions.RequestException
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
@@ -68,18 +69,17 @@ def is_supported_image_file(filepath: Path) -> bool:
     mimetype, _ = mimetypes.guess_type(filepath)
     return mimetype in SUPPORTED_IMAGE_MIMETYPES
 
-def process_files(paths: list | None, use_memory: bool, exclusions: list | None) -> tuple[str | None, str | None, list, list]:
+def process_files(paths: list | None, use_memory: bool, exclusions: list | None) -> tuple[str | None, dict, list]:
     """
     Processes files, directories, and memory to build context.
-    Returns memory content, attachment content, image data, and a list of processed text file paths.
+    Returns memory content, a dictionary of attachment paths to content, and image data.
     """
     paths = paths or []
     exclusions = exclusions or []
 
     memory_content_parts = []
-    attachments_content_parts = []
+    attachments_dict = {}
     image_data_parts = []
-    processed_text_files = []
 
     if use_memory and os.path.exists(config.PERSISTENT_MEMORY_FILE):
         try:
@@ -92,14 +92,11 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
     # Using realpath to resolve symlinks and '..'
     exclusion_paths = {Path(p).resolve() for p in exclusions}
 
-    def process_text_file(filepath: Path, source_info: str = ""):
-        """Helper to read and append text file content."""
+    def process_text_file(filepath: Path):
+        """Helper to read and store text file content in the dictionary."""
         try:
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-                source = f" (from {source_info})" if source_info else ""
-                attachments_content_parts.append(f"--- FILE{source}: {filepath.as_posix()} ---\n{content}")
-                processed_text_files.append(filepath)
+                attachments_dict[filepath] = f.read()
         except IOError as e:
             log.warning("Could not read file %s: %s", filepath, e)
 
@@ -116,20 +113,24 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
 
     def process_zip_file(zip_path: Path):
         """Helper to process text files within a zip archive."""
+        # This function still formats a string because zip contents aren't real paths
+        # that we can refresh later. We can revisit this if zip refreshing becomes a requirement.
         try:
             with zipfile.ZipFile(zip_path, 'r') as z:
+                zip_content_parts = []
                 for filename in z.namelist():
-                    if filename.endswith('/'): continue # Skip directories
+                    if filename.endswith('/'): continue
 
-                    # Check if the file inside the zip is excluded
-                    # Note: This is a simple name check. It won't handle complex nested exclusions.
                     if Path(filename).name in {p.name for p in exclusion_paths}:
                         continue
 
                     if is_supported_text_file(Path(filename)):
                         with z.open(filename) as f:
                             content = f.read().decode('utf-8', errors='ignore')
-                            attachments_content_parts.append(f"--- FILE (from {zip_path.name}): {filename} ---\n{content}")
+                            zip_content_parts.append(f"--- FILE (from {zip_path.name}): {filename} ---\n{content}")
+                if zip_content_parts:
+                    # We store the entire zip's formatted text content under a single key
+                    attachments_dict[zip_path] = "\n\n".join(zip_content_parts)
         except (zipfile.BadZipFile, IOError) as e:
             log.warning("Could not process zip file %s: %s", zip_path, e)
 
@@ -153,7 +154,6 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
             for root, dirs, files in os.walk(path_obj, topdown=True):
                 root_path = Path(root).resolve()
 
-                # Prune excluded directories from traversal
                 dirs[:] = [d for d in dirs if (root_path / d).resolve() not in exclusion_paths]
 
                 for name in files:
@@ -167,12 +167,14 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
                         process_image_file(file_path)
 
     memory_str = "\n".join(memory_content_parts) if memory_content_parts else None
-    attachments_str = "\n\n".join(attachments_content_parts) if attachments_content_parts else None
 
-    return memory_str, attachments_str, image_data_parts, processed_text_files
+    return memory_str, attachments_dict, image_data_parts
 
 def sanitize_filename(name: str) -> str:
-    """Sanitizes a string to be a valid filename."""
+    """
+    Sanitizes a string to be a valid filename.
+    Allows unicode word characters as regex \w (default) includes them.
+    """
     name = re.sub(r'[^\w\s-]', '', name).strip()
     name = re.sub(r'[-\s]+', '_', name)
     return name or "unnamed_log"
@@ -258,6 +260,8 @@ def parse_token_counts(engine_name: str, response_data: dict) -> tuple[int, int,
         usage = response_data.get('usageMetadata', {})
         p = usage.get('promptTokenCount', 0)
         c = usage.get('candidatesTokenCount', 0)
+        # Fix: Extract cachedContentTokenCount as reasoning tokens
+        r = usage.get('cachedContentTokenCount', 0)
         t = usage.get('totalTokenCount', 0)
 
     return p, c, r, t
@@ -323,6 +327,9 @@ Interactive Chat Commands:
   /clear            Clear the current conversation history.
   /history          Print the JSON of the current conversation history.
   /state            Print the current session state (engine, model, etc.).
+  /refresh [name]   Re-read attached files to update the context.
+                    If no name is given, all files are refreshed.
+                    Otherwise, refreshes all files containing 'name'.
   /save [name] [--stay] [--remember]
                     Save the session. Auto-generates a name if not provided.
                     --stay:      Do not exit after saving.
