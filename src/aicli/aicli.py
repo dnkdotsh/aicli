@@ -65,8 +65,10 @@ def run_chat_command(args):
     if not sys.stdin.isatty() and not prompt and args.both is None and not args.load:
         prompt = sys.stdin.read().strip()
 
+    is_single_shot = prompt is not None
+
     # Further prompt validation after potential stdin read
-    if prompt is not None and not prompt.strip():
+    if is_single_shot and not prompt.strip():
         print("Error: The provided prompt cannot be empty or contain only whitespace.", file=sys.stderr)
         sys.exit(1)
 
@@ -81,6 +83,10 @@ def run_chat_command(args):
     memory_enabled_for_session = settings['memory_enabled']
     if args.memory:
         memory_enabled_for_session = not memory_enabled_for_session
+
+    # Override and disable memory for any single-shot, non-interactive prompt.
+    if is_single_shot:
+        memory_enabled_for_session = False
 
     # Assemble the final system prompt from multiple sources
     system_prompt_parts = []
@@ -191,7 +197,7 @@ def main():
         if not args_list and sys.stdin.isatty():
              # Mimic the original no-arg behavior
              print(f"Starting interactive chat with default engine ('{settings['default_engine']}')...")
-             handlers.handle_chat(get_engine(settings['default_engine'], api_client.check_api_keys(settings['default_engine'])), settings['default_gemini_model'], None, None, [], [], None, None, True, True, False)
+             handlers.handle_chat(get_engine(settings['default_engine'], api_client.check_api_keys(settings['default_engine'])), settings['default_gemini_model'], None, None, [], [], None, None, True, settings['memory_enabled'], False)
         else:
              run_chat_command(args)
 

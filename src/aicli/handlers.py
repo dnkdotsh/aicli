@@ -165,10 +165,14 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
     primary_engine = engines[primary_engine_name]
     secondary_engine = engines['gemini' if primary_engine_name == 'openai' else 'openai']
 
-    sys_prompts = {
-        'openai': MULTICHAT_SYSTEM_PROMPT_OPENAI,
-        'gemini': MULTICHAT_SYSTEM_PROMPT_GEMINI
-    }
+    # Combine the user-provided system prompt with the mode-specific instructions.
+    final_sys_prompts = {}
+    if system_prompt:
+        final_sys_prompts['openai'] = f"{system_prompt}\n\n---\n\n{MULTICHAT_SYSTEM_PROMPT_OPENAI}"
+        final_sys_prompts['gemini'] = f"{system_prompt}\n\n---\n\n{MULTICHAT_SYSTEM_PROMPT_GEMINI}"
+    else:
+        final_sys_prompts['openai'] = MULTICHAT_SYSTEM_PROMPT_OPENAI
+        final_sys_prompts['gemini'] = MULTICHAT_SYSTEM_PROMPT_GEMINI
 
     log_filename_base = session_name or f"multichat_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
     log_filename = os.path.join(config.LOG_DIRECTORY, f"{log_filename_base}.jsonl")
@@ -178,9 +182,6 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
     print("Type /help for commands or /exit to end.")
 
     shared_history = []
-    if system_prompt:
-        shared_history.append(utils.construct_user_message('openai', f"[Director's Note]: The following context was provided:\n{system_prompt}", []))
-
     turn_counter = 0
     cli_history = InMemoryHistory()
 
@@ -209,7 +210,7 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
             current_history = utils.translate_history(shared_history + [user_msg], target_engine.name)
 
             print(f"\n{utils.ASSISTANT_PROMPT}[{target_engine.name.capitalize()}]: {utils.RESET_COLOR}", end='', flush=True)
-            response_text, _ = api_client.perform_chat_request(target_engine, target_model, current_history, sys_prompts[target_engine_name], max_tokens, stream=True)
+            response_text, _ = api_client.perform_chat_request(target_engine, target_model, current_history, final_sys_prompts[target_engine_name], max_tokens, stream=True)
 
             prefix = f"[{target_engine.name.capitalize()}]: "
             asst_msg_text = response_text if response_text.lstrip().startswith(prefix) else f"{prefix}{response_text}"
@@ -229,12 +230,12 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
 
             secondary_thread = threading.Thread(
                 target=_secondary_worker,
-                args=(secondary_engine, models[secondary_engine.name], history_for_secondary, sys_prompts[secondary_engine.name], max_tokens, result_queue)
+                args=(secondary_engine, models[secondary_engine.name], history_for_secondary, final_sys_prompts[secondary_engine.name], max_tokens, result_queue)
             )
             secondary_thread.start()
 
             print(f"\n{utils.ASSISTANT_PROMPT}[{primary_engine.name.capitalize()}]: {utils.RESET_COLOR}", end='', flush=True)
-            primary_response, _ = api_client.perform_chat_request(primary_engine, models[primary_engine.name], history_for_primary, sys_prompts[primary_engine.name], max_tokens, stream=True)
+            primary_response, _ = api_client.perform_chat_request(primary_engine, models[primary_engine.name], history_for_primary, final_sys_prompts[primary_engine.name], max_tokens, stream=True)
 
             secondary_thread.join()
             secondary_response = result_queue.get()
