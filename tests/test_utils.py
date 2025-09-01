@@ -79,8 +79,6 @@ class TestUtils:
     def test_process_files_with_fake_fs(self, fake_fs):
         """Tests file and directory processing using a fake filesystem."""
         # Setup fake directories and files
-        # Removed: fake_fs.create_dir(config.DATA_DIR) - already created by conftest fixture
-        # Ensure log directory is created for persistent memory if needed
         config.LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
         fake_fs.create_file(config.PERSISTENT_MEMORY_FILE, contents="persistent memory data")
 
@@ -88,13 +86,19 @@ class TestUtils:
         fake_fs.create_dir(project_dir / "src")
         fake_fs.create_file(project_dir / "src/main.py", contents="print('hello')")
         fake_fs.create_file(project_dir / "README.md", contents="# Read Me")
-        fake_fs.create_file(project_dir / "ignore.log", contents="log data") # Should be ignored
+        fake_fs.create_file(project_dir / "ignore.log", contents="log data")
+
+        # The exclusion logic resolves paths. In a test with a fake filesystem,
+        # providing a relative path like "ignore.log" would be resolved against the
+        # real filesystem's CWD, causing a mismatch. We provide an absolute path
+        # within the fake filesystem to ensure the test works correctly.
+        exclusion_path = str((project_dir / "ignore.log").resolve())
 
         # Test processing a directory
         mem, attachments, images = utils.process_files(
             paths=[str(project_dir)],
             use_memory=True,
-            exclusions=["ignore.log"]
+            exclusions=[exclusion_path]
         )
 
         assert mem == "persistent memory data"

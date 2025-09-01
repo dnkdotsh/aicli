@@ -42,11 +42,11 @@ SUPPORTED_TEXT_EXTENSIONS = {
     '.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.yaml', '.yml',
     '.csv', '.sh', '.bash', '.c', '.cpp', '.h', '.hpp', '.java', '.go', '.rs', '.php',
     '.rb', '.pl', '.sql', '.r', '.swift', '.kt', '.scala', '.ts', '.tsx', '.jsx', '.vue',
-    '.jsonl', 'diff', 'log',
+    '.jsonl', '.diff', '.log',
 }
 SUPPORTED_IMAGE_MIMETYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
 SUPPORTED_EXTENSIONLESS_FILENAMES = {
-    'dockerfile', 'makefile', 'vagrantfile', 'jenkinsfile', 'procfile', 'rakefile'
+    'dockerfile', 'makefile', 'vagrantfile', 'jenkinsfile', 'procfile', 'rakefile', '.gitignore'
 }
 
 def read_system_prompt(prompt_or_path: str) -> str:

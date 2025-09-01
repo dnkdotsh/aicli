@@ -16,6 +16,8 @@ def session_state(mock_openai_engine):
         engine=mock_openai_engine,
         model="gpt-4o-mini",
         system_prompt=None,
+        initial_system_prompt=None,
+        current_persona=None,
         max_tokens=4096,
         memory_enabled=True,
         stream_active=True,
@@ -90,6 +92,8 @@ class TestSessionLifecycle:
             engine=mock_engine,
             model='gpt-4o-mini',
             system_prompt=None,
+            initial_system_prompt=None,
+            current_persona=None,
             max_tokens=None,
             memory_enabled=True,
             command_history=["/help", "previous prompt"] # This is the key data for the test

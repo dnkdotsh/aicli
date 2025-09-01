@@ -3,7 +3,9 @@
 # Copyright (C) 2025 Dank A. Saurus
 
 # This program is free software: you can redistribute it and/or modify
-# it under a new-style BSD license. See the LICENSE file for details.
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY;
 # without even the implied warranty of
@@ -66,26 +68,39 @@ def run_chat_command(args):
         persona = persona_manager.load_persona(persona_manager.DEFAULT_PERSONA_NAME)
 
     # --- Configuration Precedence: CLI > Persona > Settings ---
-    engine_to_use = settings['default_engine']
-    max_tokens_to_use = settings['default_max_tokens']
-    stream_to_use = settings['stream']
+    engine_from_persona = persona.engine if persona else None
 
-    if persona:
-        if persona.engine: engine_to_use = persona.engine
-        if persona.max_tokens is not None: max_tokens_to_use = persona.max_tokens
-        if persona.stream is not None: stream_to_use = persona.stream
-
+    # Highest precedence: CLI arguments
+    # Note: args.engine defaults to settings['default_engine'], which is correct for this logic.
     engine_to_use = args.engine
-    if args.max_tokens != settings['default_max_tokens']: max_tokens_to_use = args.max_tokens
-    if args.stream is not None: stream_to_use = args.stream
-
     model_to_use = args.model
-    if not model_to_use:
-        if persona and persona.model:
+    max_tokens_to_use = args.max_tokens if args.max_tokens != settings['default_max_tokens'] else None
+    stream_to_use = args.stream # Can be True, False, or None
+
+    # Second precedence: Persona settings (if not overridden by CLI)
+    if engine_to_use == settings['default_engine'] and persona and persona.engine:
+        engine_to_use = persona.engine
+    if model_to_use is None and persona and persona.model:
+        # CRITICAL: Only use the persona's model if the engine wasn't overridden by a direct CLI flag.
+        # This prevents using a Gemini model with the OpenAI engine.
+        if engine_to_use == engine_from_persona:
             model_to_use = persona.model
-        else:
-            model_key = 'default_openai_chat_model' if engine_to_use == 'openai' else 'default_gemini_model'
-            model_to_use = settings[model_key]
+    if max_tokens_to_use is None and persona and persona.max_tokens is not None:
+        max_tokens_to_use = persona.max_tokens
+    if stream_to_use is None and persona and persona.stream is not None:
+        stream_to_use = persona.stream
+
+    # Lowest precedence: Application settings defaults
+    if max_tokens_to_use is None:
+        max_tokens_to_use = settings['default_max_tokens']
+    if stream_to_use is None:
+        stream_to_use = settings['stream']
+
+    # Final model lookup if still not set
+    if not model_to_use:
+        model_key = 'default_openai_chat_model' if engine_to_use == 'openai' else 'default_gemini_model'
+        model_to_use = settings[model_key]
+
 
     # --- Argument Validation ---
     if args.image and engine_to_use != 'openai':

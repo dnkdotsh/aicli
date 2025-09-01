@@ -42,7 +42,9 @@ def test_handle_chat_single_shot(mocker, capsys):
         max_tokens=100,
         stream=False,
         memory_enabled=False,
-        debug_enabled=False
+        debug_enabled=False,
+        initial_system_prompt=None,
+        persona=None
     )
 
     # Verify the API client was called correctly
@@ -78,7 +80,9 @@ def test_handle_chat_interactive_mode_setup(mocker, mock_openai_engine):
         max_tokens=200,
         stream=True,
         memory_enabled=True,
-        debug_enabled=True
+        debug_enabled=True,
+        initial_system_prompt="Interactive system prompt.",
+        persona=None
     )
 
     mock_perform_interactive_chat.assert_called_once()
@@ -121,7 +125,9 @@ def test_handle_chat_single_shot_with_attachments_and_system_prompt(mocker):
         max_tokens=None,
         stream=False,
         memory_enabled=False,
-        debug_enabled=False
+        debug_enabled=False,
+        initial_system_prompt=None,
+        persona=None
     )
 
     mock_perform_chat.assert_called_once()
