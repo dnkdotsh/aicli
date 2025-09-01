@@ -39,9 +39,10 @@ DIRECTOR_PROMPT = "\033[95m" # Bright Magenta
 RESET_COLOR = "\033[0m"
 
 SUPPORTED_TEXT_EXTENSIONS = {
-    '.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.yaml', '.yml', 'jsonl',
+    '.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.yaml', '.yml',
     '.csv', '.sh', '.bash', '.c', '.cpp', '.h', '.hpp', '.java', '.go', '.rs', '.php',
-    '.rb', '.pl', '.sql', '.r', '.swift', '.kt', '.scala', '.ts', '.tsx', '.jsx', '.vue'
+    '.rb', '.pl', '.sql', '.r', '.swift', '.kt', '.scala', '.ts', '.tsx', '.jsx', '.vue',
+    '.jsonl', 'diff', 'log',
 }
 SUPPORTED_IMAGE_MIMETYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
 
@@ -88,8 +89,6 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
         except IOError as e:
             log.warning("Could not read persistent memory file: %s", e)
 
-    # Convert string paths to Path objects for consistent handling.
-    # Using realpath to resolve symlinks and '..'
     exclusion_paths = {Path(p).resolve() for p in exclusions}
 
     def process_text_file(filepath: Path):
@@ -113,23 +112,18 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
 
     def process_zip_file(zip_path: Path):
         """Helper to process text files within a zip archive."""
-        # This function still formats a string because zip contents aren't real paths
-        # that we can refresh later. We can revisit this if zip refreshing becomes a requirement.
         try:
             with zipfile.ZipFile(zip_path, 'r') as z:
                 zip_content_parts = []
                 for filename in z.namelist():
                     if filename.endswith('/'): continue
-
                     if Path(filename).name in {p.name for p in exclusion_paths}:
                         continue
-
                     if is_supported_text_file(Path(filename)):
                         with z.open(filename) as f:
                             content = f.read().decode('utf-8', errors='ignore')
                             zip_content_parts.append(f"--- FILE (from {zip_path.name}): {filename} ---\n{content}")
                 if zip_content_parts:
-                    # We store the entire zip's formatted text content under a single key
                     attachments_dict[zip_path] = "\n\n".join(zip_content_parts)
         except (zipfile.BadZipFile, IOError) as e:
             log.warning("Could not process zip file %s: %s", zip_path, e)
@@ -153,21 +147,17 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
         elif path_obj.is_dir():
             for root, dirs, files in os.walk(path_obj, topdown=True):
                 root_path = Path(root).resolve()
-
                 dirs[:] = [d for d in dirs if (root_path / d).resolve() not in exclusion_paths]
-
                 for name in files:
                     file_path = (root_path / name).resolve()
                     if file_path in exclusion_paths:
                         continue
-
                     if is_supported_text_file(file_path):
                         process_text_file(file_path)
                     elif is_supported_image_file(file_path):
                         process_image_file(file_path)
 
     memory_str = "\n".join(memory_content_parts) if memory_content_parts else None
-
     return memory_str, attachments_dict, image_data_parts
 
 def sanitize_filename(name: str) -> str:
@@ -186,14 +176,11 @@ def translate_history(history: list, target_engine: str) -> list:
         role = msg.get('role')
         if role not in ['user', 'assistant', 'model']:
             continue
-
         text_content = extract_text_from_message(msg)
-
         if role in ['user']:
             translated.append(construct_user_message(target_engine, text_content, []))
         elif role in ['assistant', 'model']:
             translated.append(construct_assistant_message(target_engine, text_content))
-
     return translated
 
 def construct_user_message(engine_name: str, text: str, image_data: list) -> dict:
@@ -201,9 +188,8 @@ def construct_user_message(engine_name: str, text: str, image_data: list) -> dic
     content = []
     if engine_name == 'openai':
         content.append({"type": "text", "text": text})
-    else:  # Gemini
+    else:
         content.append({"text": text})
-
     if image_data:
         for img in image_data:
             if engine_name == 'openai':
@@ -211,11 +197,10 @@ def construct_user_message(engine_name: str, text: str, image_data: list) -> dic
                     "type": "image_url",
                     "image_url": {"url": f"data:{img['mime_type']};base64,{img['data']}"}
                 })
-            else:  # Gemini
+            else:
                 content.append({
                     "inline_data": {"mime_type": img['mime_type'], "data": img['data']}
                 })
-
     if engine_name == 'openai':
         return {"role": "user", "content": content}
     return {"role": "user", "parts": content}
@@ -237,20 +222,17 @@ def extract_text_from_message(message: Dict[str, Any]) -> str:
         for part in content:
             if isinstance(part, dict) and part.get('type') == 'text':
                 return part.get('text', '')
-
     parts = message.get('parts')
     if isinstance(parts, list):
         for part in parts:
             if isinstance(part, dict) and 'text' in part:
                 return part.get('text', '')
-
     return message.get('text', '')
 
 def parse_token_counts(engine_name: str, response_data: dict) -> tuple[int, int, int, int]:
     """Parses token counts from a non-streaming API response."""
     p, c, r, t = 0, 0, 0, 0
     if not response_data: return 0, 0, 0, 0
-
     if engine_name == 'openai':
         if 'usage' in response_data:
             p = response_data['usage'].get('prompt_tokens', 0)
@@ -260,10 +242,8 @@ def parse_token_counts(engine_name: str, response_data: dict) -> tuple[int, int,
         usage = response_data.get('usageMetadata', {})
         p = usage.get('promptTokenCount', 0)
         c = usage.get('candidatesTokenCount', 0)
-        # Fix: Extract cachedContentTokenCount as reasoning tokens
         r = usage.get('cachedContentTokenCount', 0)
         t = usage.get('totalTokenCount', 0)
-
     return p, c, r, t
 
 def process_stream(engine: str, response: Any, print_stream: bool = True) -> Tuple[str, dict]:
@@ -303,7 +283,6 @@ def process_stream(engine: str, response: Any, print_stream: bool = True) -> Tup
     except Exception as e:
         if print_stream: print(f"\n{SYSTEM_MSG}--> Stream interrupted: {e}{RESET_COLOR}")
         log.warning("Stream processing error: %s", e)
-
     tokens = {'prompt': p, 'completion': c, 'reasoning': r, 'total': t}
     return full_response, tokens
 

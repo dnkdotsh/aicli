@@ -4,7 +4,6 @@
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
-
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 # This program is distributed in the hope that it will be useful,
@@ -230,6 +229,7 @@ def _handle_command_memory(args: list, state: SessionState, cli_history: InMemor
         print(f"{utils.SYSTEM_MSG}--> Persistent memory is currently empty.{utils.RESET_COLOR}")
     except IOError as e:
         log.error("Could not read persistent memory file: %s", e)
+        print(f"{utils.SYSTEM_MSG}--> Error reading memory file: {e}{utils.RESET_COLOR}")
 
 def _handle_command_remember(args: list, state: SessionState, cli_history: InMemoryHistory):
     if not args:
@@ -371,6 +371,7 @@ def _handle_command_refresh(args: list, state: SessionState, cli_history: InMemo
             updated_files.append(path.name)
         except (IOError, FileNotFoundError) as e:
             log.warning("Could not re-read '%s': %s. Removing from context.", path.name, e)
+            print(f"{utils.SYSTEM_MSG}--> Warning: Could not re-read '{path.name}'. Removing from session.{utils.RESET_COLOR}")
             files_to_remove.append(path)
 
     for path in files_to_remove:
@@ -407,15 +408,17 @@ def _handle_command_attach(args: list, state: SessionState, cli_history: InMemor
         print(f"{utils.SYSTEM_MSG}--> Error: File '{path.name}' is already attached.{utils.RESET_COLOR}")
         return
 
-    try:
-        if not utils.is_supported_text_file(path):
-            print(f"{utils.SYSTEM_MSG}--> Warning: File type for '{path.name}' is not in the supported text list.{utils.RESET_COLOR}")
-        state.attachments[path] = path.read_text(encoding='utf-8', errors='ignore')
-        print(f"{utils.SYSTEM_MSG}--> Attached file: {path.name} ({_format_bytes(path.stat().st_size)}){utils.RESET_COLOR}")
-        notification_text = f"[SYSTEM] The user has attached a new file: {path.name}."
-        state.history.append(utils.construct_user_message(state.engine.name, notification_text, []))
-    except (IOError, UnicodeDecodeError) as e:
-        log.warning("Failed to attach file '%s': %s", path.name, e)
+    if utils.is_supported_text_file(path):
+        try:
+            state.attachments[path] = path.read_text(encoding='utf-8', errors='ignore')
+            print(f"{utils.SYSTEM_MSG}--> Attached file: {path.name} ({_format_bytes(path.stat().st_size)}){utils.RESET_COLOR}")
+            notification_text = f"[SYSTEM] The user has attached a new file: {path.name}."
+            state.history.append(utils.construct_user_message(state.engine.name, notification_text, []))
+        except (IOError, UnicodeDecodeError) as e:
+            log.warning("Failed to attach file '%s': %s", path.name, e)
+            print(f"{utils.SYSTEM_MSG}--> Error reading file '{path.name}': {e}{utils.RESET_COLOR}")
+    else:
+        print(f"{utils.SYSTEM_MSG}--> Error: File type '{path.suffix}' is not supported for attachment.{utils.RESET_COLOR}")
 
 def _handle_command_detach(args: list, state: SessionState, cli_history: InMemoryHistory):
     if not args:
