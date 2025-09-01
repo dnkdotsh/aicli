@@ -25,6 +25,7 @@ import datetime
 import zipfile
 import mimetypes
 import requests # Added for requests.exceptions.RequestException
+import tarfile # Added for .tar.gz support
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
@@ -100,7 +101,7 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
 
     exclusion_paths = {Path(p).resolve() for p in exclusions}
 
-    def process_text_file(filepath: Path):
+    def _process_text_file(filepath: Path):
         """Helper to read and store text file content in the dictionary."""
         try:
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -108,7 +109,7 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
         except IOError as e:
             log.warning("Could not read file %s: %s", filepath, e)
 
-    def process_image_file(filepath: Path):
+    def _process_image_file(filepath: Path):
         """Helper to read and encode image file data."""
         try:
             with open(filepath, "rb") as image_file:
@@ -119,7 +120,7 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
         except IOError as e:
             log.warning("Could not read image file %s: %s", filepath, e)
 
-    def process_zip_file(zip_path: Path):
+    def _process_zip_file(zip_path: Path):
         """Helper to process text files within a zip archive."""
         try:
             with zipfile.ZipFile(zip_path, 'r') as z:
@@ -137,6 +138,28 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
         except (zipfile.BadZipFile, IOError) as e:
             log.warning("Could not process zip file %s: %s", zip_path, e)
 
+    def _process_tar_file(tar_path: Path):
+        """Helper to process text files within a .tar.gz or .tgz archive."""
+        try:
+            # 'r:gz' mode transparently handles gzip decompression
+            with tarfile.open(tar_path, "r:gz") as tar:
+                tar_content_parts = []
+                for member in tar.getmembers():
+                    if not member.isfile(): continue
+                    member_path = Path(member.name)
+                    if member_path.name in {p.name for p in exclusion_paths}:
+                        continue
+                    if is_supported_text_file(member_path):
+                        # extractfile returns a file-like object, read from it
+                        file_obj = tar.extractfile(member)
+                        if file_obj:
+                            content = file_obj.read().decode('utf-8', errors='ignore')
+                            tar_content_parts.append(f"--- FILE (from {tar_path.name}): {member.name} ---\n{content}")
+                if tar_content_parts:
+                    attachments_dict[tar_path] = "\n\n".join(tar_content_parts)
+        except (tarfile.TarError, IOError) as e:
+            log.warning("Could not process tar file %s: %s", tar_path, e)
+
     for p_str in paths:
         path_obj = Path(p_str).resolve()
 
@@ -147,12 +170,15 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
             continue
 
         if path_obj.is_file():
-            if path_obj.suffix.lower() == '.zip':
-                process_zip_file(path_obj)
+            file_name_lower = path_obj.name.lower()
+            if file_name_lower.endswith('.zip'):
+                _process_zip_file(path_obj)
+            elif file_name_lower.endswith('.tar.gz') or file_name_lower.endswith('.tgz'):
+                _process_tar_file(path_obj)
             elif is_supported_text_file(path_obj):
-                process_text_file(path_obj)
+                _process_text_file(path_obj)
             elif is_supported_image_file(path_obj):
-                process_image_file(path_obj)
+                _process_image_file(path_obj)
         elif path_obj.is_dir():
             for root, dirs, files in os.walk(path_obj, topdown=True):
                 root_path = Path(root).resolve()
@@ -162,9 +188,9 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
                     if file_path in exclusion_paths:
                         continue
                     if is_supported_text_file(file_path):
-                        process_text_file(file_path)
+                        _process_text_file(file_path)
                     elif is_supported_image_file(file_path):
-                        process_image_file(file_path)
+                        _process_image_file(file_path)
 
     memory_str = "\n".join(memory_content_parts) if memory_content_parts else None
     return memory_str, attachments_dict, image_data_parts

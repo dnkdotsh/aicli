@@ -28,30 +28,33 @@ The following workflows are built on three core features:
 
 **Step-by-Step:**
 
-1.  **Start with a specialized persona.** Create a `code_reviewer.json` persona if you don't have one.
-2.  **Launch `aicli`**, attaching the entire feature directory for full context.
+1.  **Start with a specialized persona.** Create a `code_reviewer.json` persona if you don't have one. Launch `aicli`, attaching the entire feature directory for full context.
 
     ```bash
     aicli -P code_reviewer -f ./src/feature_x/
     ```
 
-3.  **Give the initial high-level prompt.**
+2.  **Give the initial high-level prompt.** At the `You:` prompt, type:
 
-    > **You:** I'm having an issue with the new feature. The data processing seems to fail when it receives data from the API handler. Can you review the attached code, specifically `api_handler.py` and `data_processor.py`, and look for potential race conditions or data mismatch errors?
+    > I'm having an issue with the new feature. The data processing seems to fail when it receives data from the API handler. Can you review the attached code, specifically `api_handler.py` and `data_processor.py`, and look for potential race conditions or data mismatch errors?
 
     *The AI will now analyze the files you provided and give you its initial feedback.*
 
-4.  **Modify the code.** Based on the AI's suggestion, you edit `data_processor.py` in your IDE to fix a potential bug.
+3.  **Modify the code.** Based on the AI's suggestion, you edit `data_processor.py` in your IDE to fix a potential bug.
 
-5.  **Refresh the context and re-evaluate.** Instead of starting a new session, just tell `aicli` to re-read the changed file.
+4.  **Refresh the context.** Back in `aicli`, enter the following command at the `You:` prompt:
 
-    > **You:** I've updated the file. Please review it again.
     > `/refresh data_processor.py`
-    > **You:** Now, does the updated logic in `data_processor.py` resolve the potential issue you identified?
 
-6.  **End the session**, giving the log a descriptive name for your records.
+    *The system will confirm the file has been re-read and the AI has been notified of the update.*
 
-    > **You:** /exit feature_x_debug_session
+5.  **Re-evaluate the code.** Now that the AI's context is fresh, ask it to review your changes.
+
+    > **You:** I've updated the file as we discussed. Does the new logic in `data_processor.py` resolve the potential issue you identified?
+
+6.  **End the session.** Once you're done, save the log with a descriptive name.
+
+    > **You:** `/exit feature_x_debug_session`
 
 **Why this is powerful:** You never left the terminal. The `/refresh` command is the key to an iterative workflow, allowing the AI to see your changes in real-time without the massive overhead of re-attaching or re-pasting code.
 
@@ -63,13 +66,13 @@ The following workflows are built on three core features:
 
 **Step-by-Step:**
 
-1.  **Start `aicli` and attach the entire docs folder.** A persona isn't strictly necessary here, but a simple one can help focus the AI.
+1.  **Start `aicli` and attach the entire docs folder.** A persona isn't strictly necessary here, but a targeted system prompt is very effective.
 
     ```bash
     aicli -f ./docs --system-prompt "You are a helpful assistant. Answer questions based *only* on the attached files. If the answer is not in the files, say so."
     ```
 
-2.  **Ask your questions.**
+2.  **Ask your questions at the prompt.**
 
     > **You:** How do I deploy a new service to the staging environment?
 
@@ -95,27 +98,28 @@ The following workflows are built on three core features:
 
 2.  **Brainstorm and draft.** Have a conversation with the AI to create an outline and draft the first few sections.
 
-3.  **Save your session before you finish for the day.**
+3.  **Save your session before you finish for the day.** At the prompt, type:
 
-    > **You:** This is a good start. Let's pick this up tomorrow.
-    > `/save blog_post_draft --stay`
-    > `/exit`
+    > `/save blog_post_draft`
 
-4.  **Resume your work the next day.**
+    *This command saves the entire session, including conversation history and attached files, to `blog_post_draft.json` and then exits the application.*
+
+    *(Note: Use `/save --stay` if you only want to create a checkpoint without exiting.)*
+
+4.  **Resume your work the next day.** Launch `aicli` using the `-l` flag.
 
     ```bash
     # You don't need to specify a persona or files; they are stored in the session.
     aicli -l blog_post_draft.json
     ```
 
-    *The session is loaded, and you can see the last few messages of your previous conversation.*
+    *The session is loaded, and you can see the last few messages of your previous conversation, ready to continue.*
 
     > **You:** Okay, let's continue with the section on "Advanced Techniques".
 
-5.  **Once the draft is complete, consolidate the key points into memory.** This is useful if you plan to write more articles on this topic later.
+5.  **Consolidate key points into memory.** Once the draft is complete, you can distill the core concepts into long-term memory for future articles.
 
-    > **You:** The draft is done. Please summarize the main technical points and conclusions of our conversation.
-    > `/remember`
+    > **You:** `/remember`
 
 **Why this is powerful:** The `/save` and `/load` commands turn a stateless conversation into a persistent, stateful project. The AI's context and your conversation history are never lost, allowing for deep, long-running tasks.
 
@@ -134,15 +138,15 @@ The following workflows are built on three core features:
     aicli --both -f ./requirements.md
     ```
 
-2.  **Pose the complex question to both models simultaneously.**
+2.  **Pose the complex question to both models.** At the `Director>` prompt, type:
 
-    > **Director>** Based on the attached requirements, propose a high-level strategy for a text classification system. Pay close attention to the need for handling ambiguous language. Which specific techniques or models in your arsenal would you recommend?
+    > Based on the attached requirements, propose a high-level strategy for a text classification system. Pay close attention to the need for handling ambiguous language. Which specific techniques or models in your arsenal would you recommend?
 
 3.  **Analyze and compare the responses.** The `[OpenAI]` and `[Gemini]` models will both respond. You can directly compare their reasoning, suggestions, and approaches in the same terminal view.
 
-4.  **Ask follow-up questions to a specific model.** If one model gives a more promising answer, you can target it directly.
+4.  **Ask follow-up questions to a specific model.** If one model gives a more promising answer, you can target it directly using the `/ai` command.
 
-    > **Director>** /ai gpt Your suggestion to use a fine-tuned model is interesting. Could you elaborate on the potential costs and data requirements for that approach?
+    > **Director>** `/ai gpt Your suggestion to use a fine-tuned model is interesting. Could you elaborate on the potential costs and data requirements for that approach?`
 
 **Why this is powerful:** This workflow leverages the original "fun" purpose of the tool for a serious professional goal: model evaluation. It provides a direct, side-by-side comparison of AI capabilities on the specific problems you care about.
 
