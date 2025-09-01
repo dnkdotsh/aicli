@@ -143,7 +143,7 @@ def test_handle_chat_single_shot_with_attachments_and_system_prompt(mocker):
 
 def test_handle_load_session_success(mocker):
     """Tests successfully loading a session and resuming interactive chat."""
-    mock_load_session = mocker.patch('aicli.session_manager.load_session_from_file')
+    mock_load_session = mocker.patch('aicli.commands.load_session_from_file')
     mock_perform_chat = mocker.patch('aicli.handlers.perform_interactive_chat')
 
     fake_session_state = MagicMock(spec=SessionState)
@@ -166,7 +166,7 @@ def test_handle_load_session_success(mocker):
 
 def test_handle_load_session_file_not_found_exits(mocker):
     """Tests that loading a non-existent session file causes a system exit."""
-    mocker.patch('aicli.session_manager.load_session_from_file', return_value=None)
+    mocker.patch('aicli.commands.load_session_from_file', return_value=None)
 
     with pytest.raises(SystemExit) as excinfo:
         handlers.handle_load_session("non_existent.json")
@@ -175,7 +175,7 @@ def test_handle_load_session_file_not_found_exits(mocker):
 def test_handle_load_session_missing_api_key_exits(mocker):
     """Tests that a missing API key on session load correctly exits the program."""
     mocker.patch(
-        'aicli.session_manager.load_session_from_file',
+        'aicli.commands.load_session_from_file',
         side_effect=api_client.MissingApiKeyError("Missing Fake Key")
     )
 

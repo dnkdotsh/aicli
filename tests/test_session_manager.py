@@ -60,14 +60,14 @@ class TestSessionManagerCommands:
 
     def test_command_save_signals_exit_and_saves_history(self, session_state, fake_fs, mocker, mock_cli_history):
         """Tests that /save returns True and saves the command history."""
-        mocker.patch('aicli.session_manager._generate_session_name', return_value='test_session')
+        mocker.patch('aicli.commands._generate_session_name', return_value='test_session')
         should_exit = _handle_slash_command("/save", session_state, mock_cli_history)
         assert should_exit is True
         assert session_state.command_history == ["/help", "first prompt"]
 
     def test_command_save_stay_continues_session_and_saves_history(self, session_state, fake_fs, mocker, mock_cli_history):
         """Tests that /save --stay returns False and saves the command history."""
-        mocker.patch('aicli.session_manager._generate_session_name', return_value='test_session')
+        mocker.patch('aicli.commands._generate_session_name', return_value='test_session')
         should_exit = _handle_slash_command("/save --stay", session_state, mock_cli_history)
         assert should_exit is False
         assert session_state.command_history == ["/help", "first prompt"]

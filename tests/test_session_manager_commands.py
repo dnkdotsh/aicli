@@ -1,16 +1,17 @@
 # tests/test_session_manager_commands.py
 """
 Tests for the state-modifying and file-interacting slash commands
-in aicli/session_manager.py.
+in aicli/commands.py.
 """
 
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from aicli.session_manager import _handle_slash_command, SessionState
+from aicli.session_manager import SessionState
 from aicli import utils
 from aicli import config
+from aicli import commands
 
 @pytest.fixture
 def mock_session_state(mock_openai_engine):
@@ -54,7 +55,7 @@ class TestSessionManagerFileCommands:
         test_file = Path("/test/app.py")
         fake_fs.create_file(test_file, contents="print('hello')")
 
-        should_exit = _handle_slash_command(f"/attach {test_file}", mock_session_state, MagicMock())
+        should_exit = commands.handle_attach([str(test_file)], mock_session_state, MagicMock())
 
         assert not should_exit
         assert test_file.resolve() in mock_session_state.attachments
@@ -68,7 +69,7 @@ class TestSessionManagerFileCommands:
         dockerfile = Path("/test/Dockerfile")
         fake_fs.create_file(dockerfile, contents="FROM python:3.10")
 
-        should_exit = _handle_slash_command(f"/attach {dockerfile}", mock_session_state, MagicMock())
+        should_exit = commands.handle_attach([str(dockerfile)], mock_session_state, MagicMock())
 
         assert not should_exit
         assert dockerfile.resolve() in mock_session_state.attachments
@@ -79,7 +80,7 @@ class TestSessionManagerFileCommands:
     def test_command_attach_file_not_found(self, mock_session_state, capsys):
         """Tests that /attach handles non-existent files gracefully."""
         initial_attachment_count = len(mock_session_state.attachments)
-        _handle_slash_command("/attach /non/existent/file.txt", mock_session_state, MagicMock())
+        commands.handle_attach(['/non/existent/file.txt'], mock_session_state, MagicMock())
         captured = capsys.readouterr()
 
         assert "Error: Path not found" in captured.out
@@ -91,7 +92,7 @@ class TestSessionManagerFileCommands:
         file_path = Path("/test/file.txt").resolve()
         mock_session_state.attachments = {file_path: "content"}
 
-        should_exit = _handle_slash_command("/detach file.txt", mock_session_state, MagicMock())
+        should_exit = commands.handle_detach(['file.txt'], mock_session_state, MagicMock())
 
         assert not should_exit
         assert file_path not in mock_session_state.attachments
@@ -100,7 +101,7 @@ class TestSessionManagerFileCommands:
     def test_command_detach_file_not_found(self, mock_session_state, capsys):
         """Tests that /detach handles attempts to remove non-attached files."""
         mock_session_state.attachments = {Path("/test/file.txt"): "content"}
-        _handle_slash_command("/detach non_existent", mock_session_state, MagicMock())
+        commands.handle_detach(['non_existent'], mock_session_state, MagicMock())
         captured = capsys.readouterr()
 
         assert "No attached file found" in captured.out
@@ -112,7 +113,7 @@ class TestSessionManagerFileCommands:
         fake_fs.create_file(config.PERSISTENT_MEMORY_FILE, contents="Initial memory.")
         mock_api = mocker.patch('aicli.api_client.perform_chat_request', return_value=("Initial memory. New fact.", {}))
 
-        _handle_slash_command("/remember New fact.", mock_session_state, MagicMock())
+        commands.handle_remember(['New', 'fact.'], mock_session_state, MagicMock())
 
         mock_api.assert_called_once()
         # Verify the prompt sent to the AI contains the right instruction
@@ -130,7 +131,7 @@ class TestSessionManagerFileCommands:
         """Tests that /remember with no text consolidates session history into memory."""
         mock_api = mocker.patch('aicli.api_client.perform_chat_request', return_value=("Consolidated session.", {}))
 
-        _handle_slash_command("/remember", session_state_with_history, MagicMock())
+        commands.handle_remember([], session_state_with_history, MagicMock())
 
         mock_api.assert_called_once()
         call_kwargs = mock_api.call_args.kwargs
@@ -145,12 +146,12 @@ class TestSessionManagerFileCommands:
 
     def test_command_quit_sets_flag(self, mock_session_state):
         """Tests that /quit sets the force_quit flag and signals exit."""
-        should_exit = _handle_slash_command("/quit", mock_session_state, MagicMock())
+        should_exit = commands.handle_quit([], mock_session_state, MagicMock())
         assert should_exit is True
         assert mock_session_state.force_quit is True
 
     def test_command_exit_with_name_sets_rename(self, mock_session_state):
         """Tests that /exit [name] sets the custom_log_rename property."""
-        should_exit = _handle_slash_command("/exit my custom log name", mock_session_state, MagicMock())
+        should_exit = commands.handle_exit(['my', 'custom', 'log', 'name'], mock_session_state, MagicMock())
         assert should_exit is True
         assert mock_session_state.custom_log_rename == "my custom log name"

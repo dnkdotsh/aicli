@@ -35,6 +35,7 @@ from . import config
 from . import api_client
 from . import utils
 from . import personas as persona_manager
+from . import commands
 from .engine import AIEngine, get_engine
 from .session_manager import perform_interactive_chat, SessionState
 from .settings import settings
@@ -127,10 +128,7 @@ def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt
 
 def handle_load_session(filepath_str: str):
     """Loads and starts an interactive session from a file."""
-    # Deferred imports to avoid circular dependencies
-    from .session_manager import load_session_from_file
     from pathlib import Path
-    from . import config
 
     raw_path = Path(filepath_str).expanduser()
 
@@ -145,7 +143,7 @@ def handle_load_session(filepath_str: str):
         filepath = filepath.with_suffix('.json')
 
     try:
-        initial_state = load_session_from_file(filepath)
+        initial_state = commands.load_session_from_file(filepath)
     except api_client.MissingApiKeyError as e:
         log.error(e)
         sys.exit(1)
