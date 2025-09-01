@@ -3,13 +3,14 @@
 Tests for the persona management module in aicli/personas.py.
 """
 
-import pytest
 import json
 import shutil
 
+import pytest
+
 # Import the module to be tested
-from aicli import personas
-from aicli import config
+from aicli import config, personas
+
 
 def create_fake_persona(fs, filename: str, content: dict):
     """Helper to create a persona file in the correct directory on the fake filesystem."""
@@ -31,31 +32,41 @@ class TestPersonas:
         personas.ensure_personas_directory_and_default()
 
         assert config.PERSONAS_DIRECTORY.is_dir()
-        default_persona_path = config.PERSONAS_DIRECTORY / personas.DEFAULT_PERSONA_FILENAME
+        default_persona_path = (
+            config.PERSONAS_DIRECTORY / personas.DEFAULT_PERSONA_FILENAME
+        )
         assert default_persona_path.is_file()
 
         # Check content of default persona
-        with open(default_persona_path, 'r', encoding='utf-8') as f:
+        with open(default_persona_path, encoding="utf-8") as f:
             data = json.load(f)
-        assert data['name'] == "AICLI Assistant"
-        assert "expert knowledge of the AICLI tool" in data['description']
-        assert "You are a versatile and helpful general-purpose AI assistant." in data['system_prompt']
-        assert "## AICLI Tool Documentation" in data['system_prompt']
+        assert data["name"] == "AICLI Assistant"
+        assert "expert knowledge of the AICLI tool" in data["description"]
+        assert (
+            "You are a versatile and helpful general-purpose AI assistant."
+            in data["system_prompt"]
+        )
+        assert "## AICLI Tool Documentation" in data["system_prompt"]
 
     def test_ensure_personas_directory_does_not_overwrite(self, fake_fs):
         """
         Tests that the function does not overwrite an existing default persona file.
         """
-        custom_content = {"name": "Custom Default", "system_prompt": "Do custom things."}
+        custom_content = {
+            "name": "Custom Default",
+            "system_prompt": "Do custom things.",
+        }
         create_fake_persona(fake_fs, personas.DEFAULT_PERSONA_FILENAME, custom_content)
 
         personas.ensure_personas_directory_and_default()
 
-        default_persona_path = config.PERSONAS_DIRECTORY / personas.DEFAULT_PERSONA_FILENAME
-        with open(default_persona_path, 'r', encoding='utf-8') as f:
+        default_persona_path = (
+            config.PERSONAS_DIRECTORY / personas.DEFAULT_PERSONA_FILENAME
+        )
+        with open(default_persona_path, encoding="utf-8") as f:
             data = json.load(f)
-        assert data['name'] == "Custom Default"
-        assert data['system_prompt'] == "Do custom things."
+        assert data["name"] == "Custom Default"
+        assert data["system_prompt"] == "Do custom things."
 
     def test_load_persona_success(self, fake_fs):
         """Tests successfully loading a valid persona."""
@@ -66,7 +77,7 @@ class TestPersonas:
             "engine": "openai",
             "model": "gpt-4o",
             "max_tokens": 8192,
-            "stream": False
+            "stream": False,
         }
         create_fake_persona(fake_fs, "coder.json", persona_content)
 
@@ -102,10 +113,7 @@ class TestPersonas:
     @pytest.mark.parametrize("missing_key", ["name", "system_prompt"])
     def test_load_persona_missing_required_keys(self, fake_fs, missing_key):
         """Tests that loading a persona missing required fields returns None."""
-        persona_content = {
-            "name": "Test Persona",
-            "system_prompt": "A prompt."
-        }
+        persona_content = {"name": "Test Persona", "system_prompt": "A prompt."}
         del persona_content[missing_key]
         create_fake_persona(fake_fs, "incomplete.json", persona_content)
 
@@ -114,13 +122,23 @@ class TestPersonas:
     def test_list_personas(self, fake_fs):
         """Tests listing multiple personas, ensuring valid ones are returned and sorted."""
         # Create valid personas
-        create_fake_persona(fake_fs, "coder.json", {"name": "Coder", "system_prompt": "p1"})
-        create_fake_persona(fake_fs, "writer.json", {"name": "Writer", "system_prompt": "p2"})
-        create_fake_persona(fake_fs, "analyst.json", {"name": "Analyst", "system_prompt": "p3"})
+        create_fake_persona(
+            fake_fs, "coder.json", {"name": "Coder", "system_prompt": "p1"}
+        )
+        create_fake_persona(
+            fake_fs, "writer.json", {"name": "Writer", "system_prompt": "p2"}
+        )
+        create_fake_persona(
+            fake_fs, "analyst.json", {"name": "Analyst", "system_prompt": "p3"}
+        )
 
         # Create invalid/irrelevant files that should be ignored
-        create_fake_persona(fake_fs, "incomplete.json", {"name": "Incomplete"}) # Missing system_prompt
-        fake_fs.create_file(config.PERSONAS_DIRECTORY / "not_a_persona.txt", contents="hello")
+        create_fake_persona(
+            fake_fs, "incomplete.json", {"name": "Incomplete"}
+        )  # Missing system_prompt
+        fake_fs.create_file(
+            config.PERSONAS_DIRECTORY / "not_a_persona.txt", contents="hello"
+        )
         fake_fs.create_file(config.PERSONAS_DIRECTORY / "bad.json", contents="not json")
 
         persona_list = personas.list_personas()

@@ -17,35 +17,45 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-import os
-import sys
-import json
 import base64
 import datetime
+import json
+import os
+import sys
+
 import requests
 from prompt_toolkit import prompt
 
-from . import config
-from . import api_client
-from . import utils
+from . import api_client, commands, config, utils
 from . import personas as persona_manager
-from . import commands
 from .engine import AIEngine, get_engine
-from .session_manager import perform_interactive_chat, SessionState, perform_multichat_session, MultiChatSessionState
-from .settings import settings
 from .logger import log
-from .prompts import (MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI)
+from .prompts import MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI
+from .session_manager import (
+    MultiChatSessionState,
+    SessionState,
+    perform_interactive_chat,
+    perform_multichat_session,
+)
+from .settings import settings
+
 
 def select_model(engine: AIEngine, task: str) -> str:
     """Allows the user to select a model or use the default."""
     default_model = ""
-    if task == 'chat':
-        default_model = settings['default_openai_chat_model'] if engine.name == 'openai' else settings['default_gemini_model']
-    elif task == 'image':
-        default_model = settings['default_openai_image_model']
+    if task == "chat":
+        default_model = (
+            settings["default_openai_chat_model"]
+            if engine.name == "openai"
+            else settings["default_gemini_model"]
+        )
+    elif task == "image":
+        default_model = settings["default_openai_image_model"]
 
-    use_default = prompt(f"Use default model ({default_model})? (Y/n): ").lower().strip()
-    if use_default in ('', 'y', 'yes'):
+    use_default = (
+        prompt(f"Use default model ({default_model})? (Y/n): ").lower().strip()
+    )
+    if use_default in ("", "y", "yes"):
         return default_model
 
     print("Fetching available models...")
@@ -56,11 +66,12 @@ def select_model(engine: AIEngine, task: str) -> str:
 
     print("\nPlease select a model:")
     for i, model_name in enumerate(models):
-        print(f"  {i+1}. {model_name}")
+        print(f"  {i + 1}. {model_name}")
 
     try:
-        choice = prompt(f"Enter number (or press Enter for default): ")
-        if not choice: return default_model
+        choice = prompt("Enter number (or press Enter for default): ")
+        if not choice:
+            return default_model
         index = int(choice) - 1
         if 0 <= index < len(models):
             return models[index]
@@ -70,7 +81,22 @@ def select_model(engine: AIEngine, task: str) -> str:
     print(f"Invalid selection. Using default: {default_model}")
     return default_model
 
-def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt: str, image_data: list, attachments: dict, session_name: str, max_tokens: int, stream: bool, memory_enabled: bool, debug_enabled: bool, initial_system_prompt: str | None, persona: persona_manager.Persona | None):
+
+def handle_chat(
+    engine: AIEngine,
+    model: str,
+    system_prompt: str,
+    initial_prompt: str,
+    image_data: list,
+    attachments: dict,
+    session_name: str,
+    max_tokens: int,
+    stream: bool,
+    memory_enabled: bool,
+    debug_enabled: bool,
+    initial_system_prompt: str | None,
+    persona: persona_manager.Persona | None,
+):
     """Handles both single-shot and interactive chat sessions."""
     if initial_prompt:
         # For single-shot chat, we must pre-assemble the full system prompt
@@ -81,15 +107,28 @@ def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt
 
         full_system_prompt = system_prompt
         if attachments_str:
-            full_system_prompt = (full_system_prompt or "") + f"\n\n--- ATTACHED FILES ---\n{attachments_str}"
+            full_system_prompt = (
+                full_system_prompt or ""
+            ) + f"\n\n--- ATTACHED FILES ---\n{attachments_str}"
 
         # Handle single-shot chat
-        messages_or_contents = [utils.construct_user_message(engine.name, initial_prompt, image_data)]
+        messages_or_contents = [
+            utils.construct_user_message(engine.name, initial_prompt, image_data)
+        ]
         if stream:
-             print(f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}", end='', flush=True)
-        response, token_dict = api_client.perform_chat_request(engine, model, messages_or_contents, full_system_prompt, max_tokens, stream)
+            print(
+                f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}",
+                end="",
+                flush=True,
+            )
+        response, token_dict = api_client.perform_chat_request(
+            engine, model, messages_or_contents, full_system_prompt, max_tokens, stream
+        )
         if not stream:
-            print(f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}{response}", end='')
+            print(
+                f"{utils.ASSISTANT_PROMPT}Assistant: {utils.RESET_COLOR}{response}",
+                end="",
+            )
         print(utils.format_token_string(token_dict))
     else:
         # Delegate to the session manager for interactive chat
@@ -104,9 +143,10 @@ def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt
             stream_active=stream,
             memory_enabled=memory_enabled,
             debug_active=debug_enabled,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
         )
         perform_interactive_chat(initial_state, session_name)
+
 
 def handle_load_session(filepath_str: str):
     """Loads and starts an interactive session from a file."""
@@ -121,8 +161,8 @@ def handle_load_session(filepath_str: str):
         filepath = config.SESSIONS_DIRECTORY / raw_path
 
     # Ensure the .json extension is present
-    if filepath.suffix != '.json':
-        filepath = filepath.with_suffix('.json')
+    if filepath.suffix != ".json":
+        filepath = filepath.with_suffix(".json")
 
     try:
         initial_state = commands.load_session_from_file(filepath)
@@ -139,32 +179,44 @@ def handle_load_session(filepath_str: str):
     session_name = filepath.stem
     perform_interactive_chat(initial_state, session_name)
 
-def handle_multichat_session(initial_prompt: str | None, system_prompt: str, image_data: list, session_name: str, max_tokens: int, debug_enabled: bool):
+
+def handle_multichat_session(
+    initial_prompt: str | None,
+    system_prompt: str,
+    image_data: list,
+    session_name: str,
+    max_tokens: int,
+    debug_enabled: bool,
+):
     """Sets up and delegates an interactive session with both OpenAI and Gemini."""
     try:
-        openai_key = api_client.check_api_keys('openai')
-        gemini_key = api_client.check_api_keys('gemini')
+        openai_key = api_client.check_api_keys("openai")
+        gemini_key = api_client.check_api_keys("gemini")
     except api_client.MissingApiKeyError as e:
         log.error(e)
         sys.exit(1)
 
     final_sys_prompts = {}
     if system_prompt:
-        final_sys_prompts['openai'] = f"{system_prompt}\n\n---\n\n{MULTICHAT_SYSTEM_PROMPT_OPENAI}"
-        final_sys_prompts['gemini'] = f"{system_prompt}\n\n---\n\n{MULTICHAT_SYSTEM_PROMPT_GEMINI}"
+        final_sys_prompts["openai"] = (
+            f"{system_prompt}\n\n---\n\n{MULTICHAT_SYSTEM_PROMPT_OPENAI}"
+        )
+        final_sys_prompts["gemini"] = (
+            f"{system_prompt}\n\n---\n\n{MULTICHAT_SYSTEM_PROMPT_GEMINI}"
+        )
     else:
-        final_sys_prompts['openai'] = MULTICHAT_SYSTEM_PROMPT_OPENAI
-        final_sys_prompts['gemini'] = MULTICHAT_SYSTEM_PROMPT_GEMINI
+        final_sys_prompts["openai"] = MULTICHAT_SYSTEM_PROMPT_OPENAI
+        final_sys_prompts["gemini"] = MULTICHAT_SYSTEM_PROMPT_GEMINI
 
     initial_state = MultiChatSessionState(
-        openai_engine=get_engine('openai', openai_key),
-        gemini_engine=get_engine('gemini', gemini_key),
-        openai_model=settings['default_openai_chat_model'],
-        gemini_model=settings['default_gemini_model'],
+        openai_engine=get_engine("openai", openai_key),
+        gemini_engine=get_engine("gemini", gemini_key),
+        openai_model=settings["default_openai_chat_model"],
+        gemini_model=settings["default_gemini_model"],
         max_tokens=max_tokens,
         system_prompts=final_sys_prompts,
         initial_image_data=image_data,
-        debug_active=debug_enabled
+        debug_active=debug_enabled,
     )
 
     if initial_prompt:
@@ -178,9 +230,13 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
 
 def handle_image_generation(api_key: str, engine: AIEngine, prompt: str):
     """Handles OpenAI image generation."""
-    model = select_model(engine, 'image')
+    model = select_model(engine, "image")
     if not prompt:
-        prompt = sys.stdin.read().strip() if not sys.stdin.isatty() else input("Enter a description for the image: ")
+        prompt = (
+            sys.stdin.read().strip()
+            if not sys.stdin.isatty()
+            else input("Enter a description for the image: ")
+        )
 
     if not prompt:
         print("Image generation cancelled: No prompt provided.", file=sys.stderr)
@@ -188,15 +244,18 @@ def handle_image_generation(api_key: str, engine: AIEngine, prompt: str):
 
     print(f"Generating image with {model} for prompt: '{prompt}'...")
     payload = {"model": model, "prompt": prompt, "n": 1, "size": "1024x1024"}
-    if model.startswith('dall-e'):
-        payload['response_format'] = 'b64_json'
+    if model.startswith("dall-e"):
+        payload["response_format"] = "b64_json"
 
-    url, headers = "https://api.openai.com/v1/images/generations", {"Authorization": f"Bearer {api_key}"}
+    url, headers = (
+        "https://api.openai.com/v1/images/generations",
+        {"Authorization": f"Bearer {api_key}"},
+    )
     response_data = api_client.make_api_request(url, headers, payload)
 
-    if response_data and 'data' in response_data:
-        image_url = response_data['data'][0].get('url')
-        b64_data = response_data['data'][0].get('b64_json')
+    if response_data and "data" in response_data:
+        image_url = response_data["data"][0].get("url")
+        b64_data = response_data["data"][0].get("b64_json")
         image_bytes = None
 
         if b64_data:
@@ -220,13 +279,21 @@ def handle_image_generation(api_key: str, engine: AIEngine, prompt: str):
                 safe_prompt = utils.sanitize_filename(prompt[:50])
                 base_filename = f"image_{safe_prompt}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
                 filepath = os.path.join(config.IMAGE_DIRECTORY, base_filename)
-                with open(filepath, 'wb') as f:
+                with open(filepath, "wb") as f:
                     f.write(image_bytes)
                 print(f"Image saved successfully as: {filepath}")
-                log_entry = {"timestamp": datetime.datetime.now().isoformat(), "model": model, "prompt": prompt, "file": filepath}
-                with open(config.IMAGE_LOG_FILE, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps(log_entry) + '\n')
-            except IOError as e:
+                log_entry = {
+                    "timestamp": datetime.datetime.now().isoformat(),
+                    "model": model,
+                    "prompt": prompt,
+                    "file": filepath,
+                }
+                with open(config.IMAGE_LOG_FILE, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(log_entry) + "\n")
+            except OSError as e:
                 print(f"Error saving image to file: {e}", file=sys.stderr)
     else:
-            print("Error: API response did not contain image data in a recognized format.", file=sys.stderr)
+        print(
+            "Error: API response did not contain image data in a recognized format.",
+            file=sys.stderr,
+        )

@@ -16,12 +16,12 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-import os
 from pathlib import Path
+
 import platformdirs
 
 APP_NAME = "aicli"
-APP_AUTHOR = "DankASaurus" # Optional, but good practice for platformdirs
+APP_AUTHOR = "DankASaurus"  # Optional, but good practice for platformdirs
 
 # Base directory for user-specific configuration files.
 # Uses OS-native paths:
@@ -62,4 +62,4 @@ HISTORY_SUMMARY_TRIM_TURNS = 6
 # The size in bytes at which to warn the user about large context on first prompt.
 # 100 KB is a sensible threshold, representing a significant amount of text
 # (approx. 20-25k tokens) that warrants a cost/usage warning.
-LARGE_ATTACHMENT_THRESHOLD_BYTES = 100 * 1024 # 100 KB
+LARGE_ATTACHMENT_THRESHOLD_BYTES = 100 * 1024  # 100 KB

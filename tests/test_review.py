@@ -3,14 +3,11 @@
 Tests for the session review module in aicli/review.py.
 """
 
-import pytest
 import json
-from pathlib import Path
-from unittest.mock import MagicMock, call
 
-from aicli import review
-from aicli import config
-from aicli import utils
+import pytest
+from aicli import config, review
+
 
 @pytest.fixture
 def fake_log_file(fake_fs):
@@ -24,14 +21,17 @@ def fake_log_file(fake_fs):
     log_path.write_text("\n".join(json.dumps(c) for c in content))
     return log_path
 
+
 @pytest.fixture
 def fake_session_file(fake_fs):
     """Creates a fake .json session file with 2 turns."""
     session_path = config.SESSIONS_DIRECTORY / "test_session.json"
     content = {
         "history": [
-            {"role": "user"}, {"role": "assistant"}, # Turn 1
-            {"role": "user"}, {"role": "assistant"}, # Turn 2
+            {"role": "user"},
+            {"role": "assistant"},  # Turn 1
+            {"role": "user"},
+            {"role": "assistant"},  # Turn 2
         ]
     }
     session_path.write_text(json.dumps(content))
@@ -57,8 +57,11 @@ class TestReviewHelpers:
     def test_replay_file_log(self, fake_log_file, capsys, mocker):
         """Tests replaying a .jsonl log file."""
         # Mock get_single_char to return 'q' to exit after the first turn
-        mocker.patch('aicli.review.get_single_char', return_value='q')
-        mocker.patch('aicli.utils.extract_text_from_message', side_effect=['User 1', 'Asst 1', 'User 2', 'Asst 2'])
+        mocker.patch("aicli.review.get_single_char", return_value="q")
+        mocker.patch(
+            "aicli.utils.extract_text_from_message",
+            side_effect=["User 1", "Asst 1", "User 2", "Asst 2"],
+        )
 
         review.replay_file(fake_log_file)
 
@@ -74,8 +77,13 @@ class TestReviewHelpers:
 
     def test_replay_file_session(self, fake_session_file, capsys, mocker):
         """Tests replaying a .json session file."""
-        mocker.patch('aicli.review.get_single_char', return_value='any_key') # Press any key
-        mocker.patch('aicli.utils.extract_text_from_message', side_effect=['User 1', 'Asst 1', 'User 2', 'Asst 2'])
+        mocker.patch(
+            "aicli.review.get_single_char", return_value="any_key"
+        )  # Press any key
+        mocker.patch(
+            "aicli.utils.extract_text_from_message",
+            side_effect=["User 1", "Asst 1", "User 2", "Asst 2"],
+        )
 
         review.replay_file(fake_session_file)
 
@@ -90,7 +98,7 @@ class TestReviewHelpers:
 
     def test_rename_file_success(self, fake_log_file, mocker):
         """Tests successful file renaming."""
-        mocker.patch('builtins.input', return_value="a new name")
+        mocker.patch("builtins.input", return_value="a new name")
         original_path = fake_log_file
         new_path = review.rename_file(original_path)
 
@@ -104,18 +112,18 @@ class TestReviewHelpers:
         # Create the file that will cause the collision
         (config.LOG_DIRECTORY / "a_new_name.jsonl").touch()
 
-        mocker.patch('builtins.input', return_value="a new name")
+        mocker.patch("builtins.input", return_value="a new name")
         original_path = fake_log_file
         new_path = review.rename_file(original_path)
 
-        assert new_path is None # Should fail
-        assert original_path.exists() # Original should still be there
+        assert new_path is None  # Should fail
+        assert original_path.exists()  # Original should still be there
         captured = capsys.readouterr()
         assert "Error: A file named 'a_new_name.jsonl' already exists." in captured.err
 
     def test_delete_file_confirmed(self, fake_log_file, mocker):
         """Tests that the file is deleted when user confirms with 'y'."""
-        mocker.patch('aicli.review.get_single_char', return_value='y')
+        mocker.patch("aicli.review.get_single_char", return_value="y")
         assert fake_log_file.exists()
         was_deleted = review.delete_file(fake_log_file)
         assert was_deleted is True
@@ -123,7 +131,7 @@ class TestReviewHelpers:
 
     def test_delete_file_cancelled(self, fake_log_file, mocker):
         """Tests that the file is NOT deleted when user cancels."""
-        mocker.patch('aicli.review.get_single_char', return_value='n')
+        mocker.patch("aicli.review.get_single_char", return_value="n")
         assert fake_log_file.exists()
         was_deleted = review.delete_file(fake_log_file)
         assert was_deleted is False
@@ -131,11 +139,10 @@ class TestReviewHelpers:
 
     def test_reenter_session(self, fake_session_file, mocker):
         """Tests that reenter_session calls the correct subprocess command."""
-        mock_subprocess_run = mocker.patch('subprocess.run')
+        mock_subprocess_run = mocker.patch("subprocess.run")
 
         review.reenter_session(fake_session_file)
 
         mock_subprocess_run.assert_called_once_with(
-            ['aicli', '--load', str(fake_session_file)],
-            check=True
+            ["aicli", "--load", str(fake_session_file)], check=True
         )

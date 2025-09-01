@@ -4,32 +4,32 @@ This module contains shared fixtures for the pytest suite.
 Fixtures defined here are automatically available to all test functions.
 """
 
-import pytest
-import os
-import io
-import sys
 import logging
-from unittest.mock import MagicMock
+
+import pytest
+from aicli import config  # Import config to access LOG_DIRECTORY
+from aicli.engine import GeminiEngine, OpenAIEngine
+from aicli.session_manager import SessionState
 from pyfakefs.fake_filesystem_unittest import Patcher
 
-from aicli.engine import OpenAIEngine, GeminiEngine, AIEngine
-from aicli.session_manager import SessionState
-from aicli import config # Import config to access LOG_DIRECTORY
 
 # Configure caplog to capture the 'aicli' logger
 # This hook ensures the logger is configured before tests run
 def pytest_configure(config):
     logging.getLogger("aicli").propagate = True
 
+
 @pytest.fixture
 def mock_openai_engine():
     """Provides a mock OpenAIEngine instance."""
     return OpenAIEngine(api_key="fake_openai_key")
 
+
 @pytest.fixture
 def mock_gemini_engine():
     """Provides a mock GeminiEngine instance."""
     return GeminiEngine(api_key="fake_gemini_key")
+
 
 @pytest.fixture
 def mock_session_state(mock_openai_engine):
@@ -43,8 +43,9 @@ def mock_session_state(mock_openai_engine):
         max_tokens=1024,
         memory_enabled=True,
         debug_active=False,
-        stream_active=True
+        stream_active=True,
     )
+
 
 @pytest.fixture
 def fake_fs():
@@ -75,7 +76,8 @@ def mock_requests_post(mocker):
     A fixture that mocks `requests.post` to prevent actual network calls.
     Returns the mock object for customization within tests.
     """
-    return mocker.patch('requests.post')
+    return mocker.patch("requests.post")
+
 
 @pytest.fixture
 def mock_openai_chat_response():
@@ -85,42 +87,42 @@ def mock_openai_chat_response():
         "object": "chat.completion",
         "created": 1677652288,
         "model": "gpt-4o-mini",
-        "choices": [{
-            "index": 0,
-            "message": {
-                "role": "assistant",
-                "content": "This is a test response.",
-            },
-            "finish_reason": "stop"
-        }],
-        "usage": {
-            "prompt_tokens": 10,
-            "completion_tokens": 20,
-            "total_tokens": 30
-        }
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "This is a test response.",
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
     }
+
 
 @pytest.fixture
 def mock_gemini_chat_response():
     """A fixture providing a standard, non-streaming Gemini API chat response."""
     return {
-        "candidates": [{
-            "content": {
-                "parts": [{
-                    "text": "This is a test response."
-                }],
-                "role": "model"
-            },
-            "finishReason": "STOP",
-            "index": 0
-        }],
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": "This is a test response."}],
+                    "role": "model",
+                },
+                "finishReason": "STOP",
+                "index": 0,
+            }
+        ],
         "usageMetadata": {
             "promptTokenCount": 15,
             "candidatesTokenCount": 25,
             "totalTokenCount": 40,
-            "cachedContentTokenCount": 5
-        }
+            "cachedContentTokenCount": 5,
+        },
     }
+
 
 @pytest.fixture
 def mock_prompt_toolkit(mocker):
@@ -132,7 +134,7 @@ def mock_prompt_toolkit(mocker):
     input_queue = []
 
     # Mock sys.stdin.isatty to make prompt_toolkit think it's an interactive terminal.
-    mocker.patch('sys.stdin.isatty', return_value=True)
+    mocker.patch("sys.stdin.isatty", return_value=True)
 
     # Patch prompt_toolkit.prompt where it is USED (in the handlers module).
     def _mocked_prompt_side_effect(message="", **kwargs):
@@ -143,9 +145,9 @@ def mock_prompt_toolkit(mocker):
         return input_queue.pop(0)
 
     # Patch prompt in all modules where it might be called during tests
-    mocker.patch('aicli.handlers.prompt', side_effect=_mocked_prompt_side_effect)
-    mocker.patch('aicli.session_manager.prompt', side_effect=_mocked_prompt_side_effect)
+    mocker.patch("aicli.handlers.prompt", side_effect=_mocked_prompt_side_effect)
+    mocker.patch("aicli.session_manager.prompt", side_effect=_mocked_prompt_side_effect)
 
     return {
-        'input_queue': input_queue # Tests will populate this list
+        "input_queue": input_queue  # Tests will populate this list
     }

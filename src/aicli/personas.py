@@ -21,11 +21,8 @@ Manages AI personas, including loading, listing, and creating defaults.
 
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import List, Optional
 
 from . import config
-from . import utils
 from .logger import log
 
 # Constants for the default persona
@@ -65,19 +62,22 @@ AICLI is a command-line interface for interacting with AI models like OpenAI's G
 - `/state`: Display the current session's configuration.
 """
 
+
 @dataclass
 class Persona:
     """Represents an AI persona configuration."""
+
     name: str
     filename: str
     description: str = ""
     system_prompt: str = ""
-    engine: Optional[str] = None
-    model: Optional[str] = None
-    max_tokens: Optional[int] = None
-    stream: Optional[bool] = None
+    engine: str | None = None
+    model: str | None = None
+    max_tokens: int | None = None
+    stream: bool | None = None
     # This field is for internal use and not loaded from the JSON
     raw_content: dict = field(default_factory=dict, repr=False)
+
 
 def _get_default_persona_content() -> dict:
     """Returns the content for the default persona file."""
@@ -92,8 +92,9 @@ def _get_default_persona_content() -> dict:
             f"--- AICLI DOCUMENTATION ---\n{AICLI_DOCUMENTATION}\n---"
         ),
         "engine": "gemini",
-        "model": "gemini-1.5-flash-latest"
+        "model": "gemini-1.5-flash-latest",
     }
+
 
 def ensure_personas_directory_and_default():
     """
@@ -104,55 +105,57 @@ def ensure_personas_directory_and_default():
         config.PERSONAS_DIRECTORY.mkdir(parents=True, exist_ok=True)
         default_persona_path = config.PERSONAS_DIRECTORY / DEFAULT_PERSONA_FILENAME
         if not default_persona_path.exists():
-            with open(default_persona_path, 'w', encoding='utf-8') as f:
+            with open(default_persona_path, "w", encoding="utf-8") as f:
                 json.dump(_get_default_persona_content(), f, indent=2)
             log.info("Created default persona file at %s", default_persona_path)
     except OSError as e:
         log.error("Failed to create personas directory or default persona: %s", e)
 
-def load_persona(name: str) -> Optional[Persona]:
+
+def load_persona(name: str) -> Persona | None:
     """
     Loads a persona from a JSON file in the personas directory.
     The name can be with or without the .json extension.
     """
-    if not name.endswith('.json'):
-        name += '.json'
+    if not name.endswith(".json"):
+        name += ".json"
 
     persona_path = config.PERSONAS_DIRECTORY / name
     if not persona_path.exists():
         return None
 
     try:
-        with open(persona_path, 'r', encoding='utf-8') as f:
+        with open(persona_path, encoding="utf-8") as f:
             data = json.load(f)
 
         # Basic validation
-        if 'name' not in data or 'system_prompt' not in data:
+        if "name" not in data or "system_prompt" not in data:
             log.warning("Persona file %s is missing 'name' or 'system_prompt'.", name)
             return None
 
         return Persona(
             filename=name,
-            name=data.get('name'),
-            description=data.get('description', ''),
-            system_prompt=data.get('system_prompt'),
-            engine=data.get('engine'),
-            model=data.get('model'),
-            max_tokens=data.get('max_tokens'),
-            stream=data.get('stream'),
-            raw_content=data
+            name=data.get("name"),
+            description=data.get("description", ""),
+            system_prompt=data.get("system_prompt"),
+            engine=data.get("engine"),
+            model=data.get("model"),
+            max_tokens=data.get("max_tokens"),
+            stream=data.get("stream"),
+            raw_content=data,
         )
-    except (json.JSONDecodeError, IOError) as e:
+    except (OSError, json.JSONDecodeError) as e:
         log.error("Failed to load or parse persona file %s: %s", name, e)
         return None
 
-def list_personas() -> List[Persona]:
+
+def list_personas() -> list[Persona]:
     """Lists all valid personas found in the personas directory."""
     personas = []
     if not config.PERSONAS_DIRECTORY.exists():
         return []
 
-    for file_path in config.PERSONAS_DIRECTORY.glob('*.json'):
+    for file_path in config.PERSONAS_DIRECTORY.glob("*.json"):
         persona = load_persona(file_path.name)
         if persona:
             personas.append(persona)

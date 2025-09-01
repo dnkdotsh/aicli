@@ -1,0 +1,29 @@
+# ruff.toml
+# This is the root configuration file for ruff.
+
+# Set the maximum line length to 88 characters, following the 'black' standard.
+line-length = 88
+# Specify the Python version to target for compatibility checks.
+target-version = "py310"
+
+# Configure the linter.
+[lint]
+# Select a broad set of rules for comprehensive linting.
+# E, W: pycodestyle errors and warnings
+# F: pyflakes
+# I: isort (import sorting)
+# UP: pyupgrade (modernize code)
+# B: flake8-bugbear (find potential bugs)
+# SIM: flake8-simplify (simplify complex code)
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+# Ignore specific rules if they are too noisy or conflict with project style.
+# E501 is line-length, which is handled by the formatter.
+ignore = ["E501"]
+
+# Configure the formatter.
+[format]
+# Use double quotes for strings where possible.
+quote-style = "double"
+# Enable formatting of code examples within docstrings.
+docstring-code-format = true

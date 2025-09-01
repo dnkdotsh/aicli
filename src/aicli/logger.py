@@ -17,10 +17,11 @@
 
 
 import logging
-from logging.handlers import RotatingFileHandler
 import sys
+from logging.handlers import RotatingFileHandler
 
 from . import config
+
 
 def setup_logger():
     """Configures and returns a project-wide logger."""
@@ -33,7 +34,7 @@ def setup_logger():
 
     # Create a formatter
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
     # Console handler for user-facing info/warnings/errors
@@ -44,7 +45,7 @@ def setup_logger():
     # Rotating file handler for persistent logs
     # Rotates when the log reaches 1MB, keeping up to 5 backup logs.
     file_handler = RotatingFileHandler(
-        config.ROTATING_LOG_FILE, maxBytes=1024*1024, backupCount=5, encoding='utf-8'
+        config.ROTATING_LOG_FILE, maxBytes=1024 * 1024, backupCount=5, encoding="utf-8"
     )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
@@ -55,6 +56,7 @@ def setup_logger():
         logger.addHandler(file_handler)
 
     return logger
+
 
 # Singleton logger instance to be imported by other modules
 log = setup_logger()
