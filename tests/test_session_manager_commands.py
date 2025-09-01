@@ -8,10 +8,12 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from aicli.session_manager import SessionState
+from aicli.session_manager import SessionState, MultiChatSessionState
 from aicli import utils
 from aicli import config
 from aicli import commands
+from aicli.engine import OpenAIEngine, GeminiEngine
+from aicli.prompts import CONTINUATION_PROMPT
 
 @pytest.fixture
 def mock_session_state(mock_openai_engine):
@@ -155,3 +157,37 @@ class TestSessionManagerFileCommands:
         should_exit = commands.handle_exit(['my', 'custom', 'log', 'name'], mock_session_state, MagicMock())
         assert should_exit is True
         assert mock_session_state.custom_log_rename == "my custom log name"
+
+@pytest.fixture
+def mock_multichat_state(mock_openai_engine, mock_gemini_engine):
+    """Provides a fresh MultiChatSessionState for each test."""
+    return MultiChatSessionState(
+        openai_engine=mock_openai_engine,
+        gemini_engine=mock_gemini_engine,
+        openai_model="gpt-4o-mini",
+        gemini_model="gemini-1.5-flash",
+        max_tokens=1024,
+        system_prompts={'openai': 'p1', 'gemini': 'p2'}
+    )
+
+class TestMultiChatCommands:
+    """Test suite for multi-chat specific commands."""
+
+    def test_multichat_exit(self, mock_multichat_state):
+        """Tests that /exit returns True."""
+        should_exit = commands.handle_multichat_exit([], mock_multichat_state, MagicMock())
+        assert should_exit is True
+
+    def test_multichat_help(self, mocker):
+        """Tests that /help calls the correct display function."""
+        mock_display_help = mocker.patch('aicli.utils.display_help')
+        commands.handle_multichat_help([], MagicMock(), MagicMock())
+        mock_display_help.assert_called_once_with('multichat')
+
+    def test_multichat_history(self, mock_multichat_state, capsys):
+        """Tests that /history prints the shared history."""
+        mock_multichat_state.shared_history = [{"role": "user", "content": "test"}]
+        commands.handle_multichat_history([], mock_multichat_state, MagicMock())
+        captured = capsys.readouterr()
+        assert '"role": "user"' in captured.out
+        assert '"content": "test"' in captured.out

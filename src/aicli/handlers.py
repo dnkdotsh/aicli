@@ -23,13 +23,7 @@ import json
 import base64
 import datetime
 import requests
-import threading
-import queue
-import copy
 from prompt_toolkit import prompt
-from prompt_toolkit.history import InMemoryHistory
-from prompt_toolkit.formatted_text import ANSI
-import re # Added for regex for _format_multichat_response
 
 from . import config
 from . import api_client
@@ -37,22 +31,10 @@ from . import utils
 from . import personas as persona_manager
 from . import commands
 from .engine import AIEngine, get_engine
-from .session_manager import perform_interactive_chat, SessionState
+from .session_manager import perform_interactive_chat, SessionState, perform_multichat_session, MultiChatSessionState
 from .settings import settings
 from .logger import log
-from .prompts import (MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI,
-                     CONTINUATION_PROMPT)
-
-def _clean_ai_response_text(engine_name: str, raw_response: str) -> str:
-    """
-    Strips any self-labels the AI might have added despite system prompts,
-    returning only the cleaned response text without any client-side prefix.
-    """
-    # Regex to match leading AI-generated labels (e.g., "[Openai]:", "[Gemini]:", possibly with optional colon and whitespace)
-    # This pattern accounts for variations in spacing and capitalization.
-    ai_label_pattern = re.compile(r"^\[" + re.escape(engine_name.capitalize()) + r"\]:?\s*", re.IGNORECASE)
-    cleaned_response = ai_label_pattern.sub("", raw_response.lstrip())
-    return cleaned_response
+from .prompts import (MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI)
 
 def select_model(engine: AIEngine, task: str) -> str:
     """Allows the user to select a model or use the default."""
@@ -157,49 +139,15 @@ def handle_load_session(filepath_str: str):
     session_name = filepath.stem
     perform_interactive_chat(initial_state, session_name)
 
-def _secondary_worker(engine, model, history, system_prompt, max_tokens, result_queue):
-    """A worker function to be run in a thread for the secondary model."""
-    try:
-        # Perform chat request, do NOT print stream here
-        response_text, _ = api_client.perform_chat_request(
-            engine, model, history, system_prompt, max_tokens, stream=True, print_stream=False
-        )
-        # Clean the AI's response text (strip self-labels) before putting into queue
-        cleaned_response_text = _clean_ai_response_text(engine.name, response_text)
-        result_queue.put({'engine_name': engine.name, 'cleaned_text': cleaned_response_text})
-    except Exception as e:
-        log.error("Secondary model thread failed: %s", e)
-        # Ensure that engine.name always returns a string, not a MagicMock object, in tests.
-        result_queue.put({'engine_name': engine.name, 'cleaned_text': f"Error: Could not get response from {engine.name}."})
-
 def handle_multichat_session(initial_prompt: str | None, system_prompt: str, image_data: list, session_name: str, max_tokens: int, debug_enabled: bool):
-    """Manages an interactive session with both OpenAI and Gemini."""
+    """Sets up and delegates an interactive session with both OpenAI and Gemini."""
     try:
         openai_key = api_client.check_api_keys('openai')
         gemini_key = api_client.check_api_keys('gemini')
     except api_client.MissingApiKeyError as e:
         log.error(e)
-        sys.exit(1) # Exit if API key is missing
+        sys.exit(1)
 
-    openai_engine = get_engine('openai', openai_key)
-    gemini_engine = get_engine('gemini', gemini_key)
-    openai_model = settings['default_openai_chat_model']
-    gemini_model = settings['default_gemini_model']
-
-    primary_engine_name = settings['default_engine']
-
-    engines = {'openai': openai_engine, 'gemini': gemini_engine}
-    models = {'openai': openai_model, 'gemini': gemini_model}
-
-    engine_aliases = {
-        'gpt': 'openai', 'openai': 'openai',
-        'gem': 'gemini', 'gemini': 'gemini', 'google': 'gemini'
-    }
-
-    primary_engine = engines[primary_engine_name]
-    secondary_engine = engines['gemini' if primary_engine_name == 'openai' else 'openai']
-
-    # Combine the user-provided system prompt with the mode-specific instructions.
     final_sys_prompts = {}
     if system_prompt:
         final_sys_prompts['openai'] = f"{system_prompt}\n\n---\n\n{MULTICHAT_SYSTEM_PROMPT_OPENAI}"
@@ -208,147 +156,25 @@ def handle_multichat_session(initial_prompt: str | None, system_prompt: str, ima
         final_sys_prompts['openai'] = MULTICHAT_SYSTEM_PROMPT_OPENAI
         final_sys_prompts['gemini'] = MULTICHAT_SYSTEM_PROMPT_GEMINI
 
-    log_filename_base = session_name or f"multichat_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    log_filename = os.path.join(config.LOG_DIRECTORY, f"{log_filename_base}.jsonl")
-
-    print(f"Starting interactive multi-chat. Primary engine: {primary_engine.name.capitalize()}.")
-    print(f"Session log will be saved to: {log_filename}")
-    print("Type /help for commands or /exit to end.")
-
-    shared_history = []
-    turn_counter = 0
-    cli_history = InMemoryHistory()
-
-    def process_turn(prompt_text):
-        nonlocal turn_counter
-        nonlocal shared_history
-        turn_counter += 1
-
-        # Handle slash commands for targeted prompts
-        if prompt_text.lower().strip().startswith('/ai'):
-            parts = prompt_text.strip().split(' ', 2)
-
-            if len(parts) < 2 or parts[1].lower() not in engine_aliases:
-                print(f"{utils.SYSTEM_MSG}--> Usage: /ai <gpt|gem> [prompt]{utils.RESET_COLOR}")
-                return
-
-            target_alias = parts[1].lower()
-            target_engine_name = engine_aliases[target_alias]
-            target_prompt = parts[2] if len(parts) > 2 else CONTINUATION_PROMPT
-
-            target_engine = engines[target_engine_name]
-            target_model = models[target_engine_name]
-
-            user_msg_text = f"Director to {target_engine.name.capitalize()}: {target_prompt}"
-            user_msg = utils.construct_user_message(target_engine.name, user_msg_text, image_data if turn_counter == 1 else [])
-            current_history = utils.translate_history(shared_history + [user_msg], target_engine.name)
-
-            print(f"\n{utils.ASSISTANT_PROMPT}[{target_engine.name.capitalize()}]: {utils.RESET_COLOR}", end='', flush=True)
-            # Perform chat request, streaming to stdout. The raw_response will capture the full stream.
-            raw_response, _ = api_client.perform_chat_request(target_engine, target_model, current_history, final_sys_prompts[target_engine_name], max_tokens, stream=True)
-            print() # Ensure a newline after streamed output
-
-            # Clean the AI's response text and then format with client-controlled prefix for history
-            cleaned_response_text = _clean_ai_response_text(target_engine.name, raw_response)
-            formatted_response_for_history = f"[{target_engine.name.capitalize()}]: {cleaned_response_text}"
-            asst_msg = utils.construct_assistant_message('openai', formatted_response_for_history)
-            shared_history.extend([utils.construct_user_message('openai', user_msg_text, []), asst_msg])
-
-        # Handle regular messages for broadcast
-        else:
-            user_msg_text = f"Director to All: {prompt_text}"
-            user_msg_for_history = utils.construct_user_message('openai', user_msg_text, [])
-
-            result_queue = queue.Queue()
-
-            history_for_primary = utils.translate_history(shared_history + [user_msg_for_history], primary_engine.name)
-            history_for_secondary = utils.translate_history(shared_history + [user_msg_for_history], secondary_engine.name)
-
-            secondary_thread = threading.Thread(
-                target=_secondary_worker,
-                args=(secondary_engine, models[secondary_engine.name], history_for_secondary, final_sys_prompts[secondary_engine.name], max_tokens, result_queue)
-            )
-            secondary_thread.start()
-
-            # --- Primary AI (streaming output) ---
-            print(f"\n{utils.ASSISTANT_PROMPT}[{primary_engine.name.capitalize()}]: {utils.RESET_COLOR}", end='', flush=True)
-            primary_response_streamed, _ = api_client.perform_chat_request(primary_engine, models[primary_engine.name], history_for_primary, final_sys_prompts[primary_engine.name], max_tokens, stream=True)
-            print() # CRITICAL FIX: Ensure a newline after the streamed content
-
-            # Add extra newline between AI responses as requested
-            print()
-
-            # --- Secondary AI (block-printed output) ---
-            secondary_thread.join() # Wait for the secondary AI response to complete
-            secondary_result = result_queue.get() # Get the dict: {'engine_name': ..., 'cleaned_text': ...}
-            secondary_engine_name = secondary_result['engine_name']
-            secondary_response_cleaned_text = secondary_result['cleaned_text']
-
-            # Print secondary AI response with green prefix, default text color
-            print(f"{utils.ASSISTANT_PROMPT}[{secondary_engine_name.capitalize()}]: {utils.RESET_COLOR}{secondary_response_cleaned_text}")
-
-            # Construct history messages using the *cleaned* text, prefixed for internal consistency
-            formatted_primary_response_for_history = f"[{primary_engine.name.capitalize()}]: { _clean_ai_response_text(primary_engine.name, primary_response_streamed) }"
-            formatted_secondary_response_for_history = f"[{secondary_engine_name.capitalize()}]: {secondary_response_cleaned_text}"
-
-            primary_msg = utils.construct_assistant_message('openai', formatted_primary_response_for_history)
-            secondary_msg = utils.construct_assistant_message('openai', formatted_secondary_response_for_history)
-
-            first_msg, second_msg = (primary_msg, secondary_msg) if primary_engine_name == 'openai' else (secondary_msg, primary_msg)
-            shared_history.extend([user_msg_for_history, first_msg, second_msg])
-
-        try:
-            with open(log_filename, 'a', encoding='utf-8') as f:
-                # Log the history slice with client-formatted responses for clarity in logs
-                log_history_slice = []
-                # User prompt
-                log_history_slice.append(shared_history[-3] if not prompt_text.lower().strip().startswith('/ai') else shared_history[-2])
-                # AI responses (take from the formatted ones directly)
-                if not prompt_text.lower().strip().startswith('/ai'):
-                    log_history_slice.append(primary_msg) # Primary AI's formatted message
-                    log_history_slice.append(secondary_msg) # Secondary AI's formatted message
-                else:
-                    log_history_slice.append(asst_msg) # Targeted AI's formatted message
-
-                f.write(json.dumps({"turn": turn_counter, "history_slice": log_history_slice}) + '\n')
-
-        except IOError as e:
-            log.warning("Could not write to session log file: %s", e)
+    initial_state = MultiChatSessionState(
+        openai_engine=get_engine('openai', openai_key),
+        gemini_engine=get_engine('gemini', gemini_key),
+        openai_model=settings['default_openai_chat_model'],
+        gemini_model=settings['default_gemini_model'],
+        max_tokens=max_tokens,
+        system_prompts=final_sys_prompts,
+        initial_image_data=image_data,
+        debug_active=debug_enabled
+    )
 
     if initial_prompt:
-        process_turn(initial_prompt)
+        # For a non-interactive initial prompt, we can reuse the session loop logic
+        # by simply pre-populating the first turn.
+        perform_multichat_session(initial_state, session_name)
+    else:
+        # For interactive mode, just start the loop.
+        perform_multichat_session(initial_state, session_name)
 
-    try:
-        while True:
-            prompt_message = f"\n{utils.DIRECTOR_PROMPT}Director> {utils.RESET_COLOR}"
-            user_input = prompt(ANSI(prompt_message), history=cli_history)
-
-            if not user_input.strip():
-                sys.stdout.write('\x1b[1A')
-                sys.stdout.write('\x1b[2K')
-                sys.stdout.flush()
-                continue
-
-            is_command = user_input.lstrip().startswith('/')
-            if is_command:
-                sys.stdout.write('\x1b[1A')
-                sys.stdout.write('\x1b[2K')
-                sys.stdout.flush()
-
-            if user_input.lower().strip() == '/exit':
-                break
-            if user_input.lower().strip() == '/help':
-                utils.display_help('multichat')
-                continue
-            if user_input.lower().strip() == '/history':
-                print(json.dumps(shared_history, indent=2))
-                continue
-
-            process_turn(user_input)
-    except (KeyboardInterrupt, EOFError):
-        print("\nSession interrupted.")
-    finally:
-        print("\nSession ended.")
 
 def handle_image_generation(api_key: str, engine: AIEngine, prompt: str):
     """Handles OpenAI image generation."""

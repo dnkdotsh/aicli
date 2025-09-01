@@ -41,7 +41,7 @@ from .prompts import (MEMORY_INTEGRATION_PROMPT, LOG_RENAMING_PROMPT,
                       DIRECT_MEMORY_INJECTION_PROMPT)
 
 if TYPE_CHECKING:
-    from .session_manager import SessionState
+    from .session_manager import SessionState, MultiChatSessionState
 
 
 def _format_bytes(byte_count: int) -> str:
@@ -230,7 +230,7 @@ def rename_session_log(engine: AIEngine, history: list, original_filepath: str):
     else:
         log.warning("Could not generate a descriptive name for the session log.")
 
-# --- Command Handler Functions ---
+# --- Single-Chat Command Handler Functions ---
 
 def handle_exit(args: list, state: "SessionState", cli_history: InMemoryHistory) -> bool:
     if args:
@@ -543,8 +543,136 @@ def handle_persona(args: list, state: "SessionState", cli_history: InMemoryHisto
     notification_text = f"[SYSTEM] Persona changed to '{new_persona.name}'. New instructions are now in effect."
     state.history.append(utils.construct_user_message(state.engine.name, notification_text, []))
 
+# --- Multi-Chat Command Handler Functions ---
 
-# --- Command Dispatcher Map ---
+def _save_multichat_session_to_file(state: "MultiChatSessionState", filename: str) -> bool:
+    if not filename.endswith('.json'):
+        filename += '.json'
+    safe_name = utils.sanitize_filename(filename.rsplit('.', 1)[0]) + '.json'
+    filepath = config.SESSIONS_DIRECTORY / safe_name
+
+    state_dict = asdict(state)
+    state_dict['session_type'] = 'multichat'
+    # Engine objects are not serializable and can be recreated on load
+    del state_dict['openai_engine']
+    del state_dict['gemini_engine']
+
+    try:
+        utils.ensure_dir_exists(config.SESSIONS_DIRECTORY)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(state_dict, f, indent=2)
+        print(f"{utils.SYSTEM_MSG}--> Multi-chat session saved successfully to: {filepath}{utils.RESET_COLOR}")
+        return True
+    except (IOError, TypeError) as e:
+        log.error("Failed to save multi-chat session state: %s", e)
+        print(f"{utils.SYSTEM_MSG}--> Error saving session: {e}{utils.RESET_COLOR}")
+        return False
+
+def handle_multichat_exit(args: list, state: "MultiChatSessionState", cli_history: InMemoryHistory) -> bool:
+    if args:
+        state.custom_log_rename = ' '.join(args)
+    return True
+
+def handle_multichat_quit(args: list, state: "MultiChatSessionState", cli_history: InMemoryHistory) -> bool:
+    state.force_quit = True
+    return True
+
+def handle_multichat_help(args: list, state: "MultiChatSessionState", cli_history: InMemoryHistory):
+    utils.display_help('multichat')
+
+def handle_multichat_history(args: list, state: "MultiChatSessionState", cli_history: InMemoryHistory):
+    print(json.dumps(state.shared_history, indent=2))
+
+def handle_multichat_debug(args: list, state: "MultiChatSessionState", cli_history: InMemoryHistory):
+    state.debug_active = not state.debug_active
+    status = "ENABLED" if state.debug_active else "DISABLED"
+    print(f"{utils.SYSTEM_MSG}--> Session-specific debug logging is now {status}.{utils.RESET_COLOR}")
+
+def handle_multichat_remember(args: list, state: "MultiChatSessionState", cli_history: InMemoryHistory):
+    primary_engine_name = app_settings.settings['default_engine']
+    primary_engine = state.openai_engine if primary_engine_name == 'openai' else state.gemini_engine
+    primary_model_key = 'helper_model_openai' if primary_engine_name == 'openai' else 'helper_model_gemini'
+    primary_model = app_settings.settings[primary_model_key]
+
+    if not args:
+        if not state.shared_history:
+            print(f"{utils.SYSTEM_MSG}--> Nothing to consolidate; conversation history is empty.{utils.RESET_COLOR}")
+            return
+        consolidate_session_into_memory(primary_engine, primary_model, state.shared_history)
+    else:
+        fact_to_remember = ' '.join(args)
+        _inject_fact_into_memory(primary_engine, fact_to_remember)
+
+def handle_multichat_max_tokens(args: list, state: "MultiChatSessionState", cli_history: InMemoryHistory):
+    if args and args[0].isdigit():
+        state.max_tokens = int(args[0])
+        print(f"{utils.SYSTEM_MSG}--> Max tokens for this session set to: {state.max_tokens}.{utils.RESET_COLOR}")
+    else:
+        print(f"{utils.SYSTEM_MSG}--> Usage: /max-tokens <number>{utils.RESET_COLOR}")
+
+def handle_multichat_clear(args: list, state: "MultiChatSessionState", cli_history: InMemoryHistory):
+    confirm = prompt("This will clear all conversation history. Type `proceed` to confirm: ")
+    if confirm.lower() == 'proceed':
+        state.shared_history.clear()
+        print(f"{utils.SYSTEM_MSG}--> Conversation history has been cleared.{utils.RESET_COLOR}")
+    else:
+        print(f"{utils.SYSTEM_MSG}--> Clear cancelled.{utils.RESET_COLOR}")
+
+def handle_multichat_model(args: list, state: "MultiChatSessionState", cli_history: InMemoryHistory):
+    if len(args) != 2:
+        print(f"{utils.SYSTEM_MSG}--> Usage: /model <gpt|gem> <model_name>{utils.RESET_COLOR}")
+        return
+
+    engine_alias, model_name = args[0].lower(), args[1]
+    engine_map = {'gpt': 'openai', 'gem': 'gemini'}
+
+    if engine_alias not in engine_map:
+        print(f"{utils.SYSTEM_MSG}--> Invalid engine alias. Use 'gpt' for OpenAI or 'gem' for Gemini.{utils.RESET_COLOR}")
+        return
+
+    target_engine = engine_map[engine_alias]
+    if target_engine == 'openai':
+        state.openai_model = model_name
+        print(f"{utils.SYSTEM_MSG}--> OpenAI model set to: {model_name}{utils.RESET_COLOR}")
+    else: # gemini
+        state.gemini_model = model_name
+        print(f"{utils.SYSTEM_MSG}--> Gemini model set to: {model_name}{utils.RESET_COLOR}")
+
+def handle_multichat_state(args: list, state: "MultiChatSessionState", cli_history: InMemoryHistory):
+    print(f"{utils.SYSTEM_MSG}--- Multi-Chat Session State ---{utils.RESET_COLOR}")
+    print(f"  OpenAI Model: {state.openai_model}")
+    print(f"  Gemini Model: {state.gemini_model}")
+    print(f"  Max Tokens: {state.max_tokens or 'Default'}")
+    print(f"  Debug Logging: {'On' if state.debug_active else 'Off'}")
+    print(f"  System Prompts: {'Active' if state.system_prompts else 'None'}")
+    if state.initial_image_data:
+         print(f"  Attached Images: {len(state.initial_image_data)}")
+
+def handle_multichat_save(args: list, state: "MultiChatSessionState", cli_history: InMemoryHistory) -> bool:
+    should_remember, should_stay = False, False
+    filename_parts = [arg for arg in args if arg not in ('--remember', '--stay')]
+    if '--remember' in args: should_remember = True
+    if '--stay' in args: should_stay = True
+
+    filename = ' '.join(filename_parts)
+    if not filename:
+        print(f"{utils.SYSTEM_MSG}--> Please provide a name for the session file.{utils.RESET_COLOR}")
+        print(f"{utils.SYSTEM_MSG}--> Usage: /save <filename> [--stay] [--remember]{utils.RESET_COLOR}")
+        return False # Stay in session
+
+    state.command_history = cli_history.get_strings()
+
+    if _save_multichat_session_to_file(state, filename):
+        if should_stay:
+            return False
+        if not should_remember:
+            state.exit_without_memory = True
+        else:
+            handle_multichat_remember([], state, cli_history)
+        return True
+    return False
+
+# --- Command Dispatcher Maps ---
 
 COMMAND_MAP = {
     '/exit': handle_exit,
@@ -569,4 +697,20 @@ COMMAND_MAP = {
     '/detach': handle_detach,
     '/personas': handle_personas,
     '/persona': handle_persona,
+}
+
+MULTICHAT_COMMAND_MAP = {
+    '/exit': handle_multichat_exit,
+    '/quit': handle_multichat_quit,
+    '/help': handle_multichat_help,
+    '/history': handle_multichat_history,
+    '/debug': handle_multichat_debug,
+    '/memory': handle_memory, # Reuses read-only single-chat handler
+    '/remember': handle_multichat_remember,
+    '/max-tokens': handle_multichat_max_tokens,
+    '/clear': handle_multichat_clear,
+    '/model': handle_multichat_model,
+    '/state': handle_multichat_state,
+    '/set': handle_set, # Reuses global settings single-chat handler
+    '/save': handle_multichat_save,
 }

@@ -20,6 +20,8 @@ import os
 import sys
 import json
 import datetime
+import threading
+import queue
 from dataclasses import dataclass, field
 from prompt_toolkit import prompt
 from prompt_toolkit.history import InMemoryHistory
@@ -33,7 +35,9 @@ from . import personas as persona_manager
 from . import commands
 from .engine import AIEngine
 from .logger import log
-from .prompts import HISTORY_SUMMARY_PROMPT
+from .prompts import HISTORY_SUMMARY_PROMPT, CONTINUATION_PROMPT
+
+# --- Single-Chat Session State and Logic ---
 
 @dataclass
 class SessionState:
@@ -221,6 +225,182 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
                     log.error("Failed to rename session log: %s", e)
             elif not session_name:
                 commands.rename_session_log(initial_state.engine, initial_state.history, log_filename)
+
+        if initial_state.debug_active:
+            debug_filename = f"debug_{os.path.splitext(log_filename_base)[0]}.jsonl"
+            debug_filepath = config.LOG_DIRECTORY / debug_filename
+            print(f"Saving debug log to: {debug_filepath}")
+            try:
+                with open(debug_filepath, 'w', encoding='utf-8') as f:
+                    for entry in initial_state.session_raw_logs:
+                        f.write(json.dumps(entry) + '\n')
+            except IOError as e:
+                log.error("Could not save debug log file: %s", e)
+
+# --- Multi-Chat Session State and Logic ---
+
+@dataclass
+class MultiChatSessionState:
+    """A dataclass to hold the state of an interactive multi-chat session."""
+    openai_engine: AIEngine
+    gemini_engine: AIEngine
+    openai_model: str
+    gemini_model: str
+    max_tokens: int
+    system_prompts: dict = field(default_factory=dict)
+    initial_image_data: list = field(default_factory=list)
+    shared_history: list = field(default_factory=list)
+    command_history: list[str] = field(default_factory=list)
+    debug_active: bool = False
+    session_raw_logs: list = field(default_factory=list)
+    exit_without_memory: bool = False
+    force_quit: bool = False
+    custom_log_rename: str | None = None
+
+def _secondary_worker(engine, model, history, system_prompt, max_tokens, result_queue, srl_list):
+    """A worker function to be run in a thread for the secondary model."""
+    try:
+        response_text, _ = api_client.perform_chat_request(
+            engine, model, history, system_prompt, max_tokens, stream=True, print_stream=False, session_raw_logs=srl_list
+        )
+        cleaned_response_text = utils.clean_ai_response_text(engine.name, response_text)
+        result_queue.put({'engine_name': engine.name, 'cleaned_text': cleaned_response_text})
+    except Exception as e:
+        log.error("Secondary model thread failed: %s", e)
+        result_queue.put({'engine_name': engine.name, 'cleaned_text': f"Error: Could not get response from {engine.name}."})
+
+def _handle_multichat_slash_command(user_input: str, state: MultiChatSessionState, cli_history: InMemoryHistory) -> bool:
+    """Handles in-app slash commands for multi-chat mode."""
+    parts = user_input.strip().split()
+    command_str = parts[0].lower()
+    args = parts[1:]
+
+    # The /ai command is a special case handled directly in the loop.
+    if command_str == '/ai':
+        return False
+
+    handler = commands.MULTICHAT_COMMAND_MAP.get(command_str)
+    if handler:
+        return handler(args, state, cli_history) or False
+    else:
+        print(f"{utils.SYSTEM_MSG}--> Unknown command: {command_str}. Type /help for commands.{utils.RESET_COLOR}")
+        return False
+
+def perform_multichat_session(initial_state: MultiChatSessionState, session_name: str):
+    """Manages the main loop for an interactive multi-chat session."""
+    log_filename_base = session_name or f"multichat_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    log_filename = os.path.join(config.LOG_DIRECTORY, f"{log_filename_base}.jsonl")
+
+    primary_engine_name = app_settings.settings['default_engine']
+    engines = {'openai': initial_state.openai_engine, 'gemini': initial_state.gemini_engine}
+    models = {'openai': initial_state.openai_model, 'gemini': initial_state.gemini_model}
+    engine_aliases = {'gpt': 'openai', 'openai': 'openai', 'gem': 'gemini', 'gemini': 'gemini', 'google': 'gemini'}
+    primary_engine = engines[primary_engine_name]
+    secondary_engine = engines['gemini' if primary_engine_name == 'openai' else 'openai']
+
+    print(f"Starting interactive multi-chat. Primary engine: {primary_engine.name.capitalize()}.")
+    print(f"Session log will be saved to: {log_filename}")
+    print("Type /help for commands or /exit to end.")
+
+    turn_counter = 0
+    cli_history = InMemoryHistory()
+    for command in initial_state.command_history:
+        cli_history.append_string(command)
+
+    def process_turn(prompt_text):
+        nonlocal turn_counter
+        turn_counter += 1
+        srl_list = initial_state.session_raw_logs if initial_state.debug_active else None
+
+        if prompt_text.lower().strip().startswith('/ai'):
+            parts = prompt_text.strip().split(' ', 2)
+            if len(parts) < 2 or parts[1].lower() not in engine_aliases:
+                print(f"{utils.SYSTEM_MSG}--> Usage: /ai <gpt|gem> [prompt]{utils.RESET_COLOR}")
+                return
+            target_engine_name = engine_aliases[parts[1].lower()]
+            target_prompt = parts[2] if len(parts) > 2 else CONTINUATION_PROMPT
+            target_engine = engines[target_engine_name]
+            target_model = models[target_engine_name]
+
+            user_msg_text = f"Director to {target_engine.name.capitalize()}: {target_prompt}"
+            user_msg = utils.construct_user_message(target_engine.name, user_msg_text, initial_state.initial_image_data if turn_counter == 1 else [])
+            current_history = utils.translate_history(initial_state.shared_history + [user_msg], target_engine.name)
+
+            print(f"\n{utils.ASSISTANT_PROMPT}[{target_engine.name.capitalize()}]: {utils.RESET_COLOR}", end='', flush=True)
+            raw_response, _ = api_client.perform_chat_request(target_engine, target_model, current_history, initial_state.system_prompts[target_engine_name], initial_state.max_tokens, stream=True, session_raw_logs=srl_list)
+            print()
+
+            cleaned_response_text = utils.clean_ai_response_text(target_engine.name, raw_response)
+            formatted_response_for_history = f"[{target_engine.name.capitalize()}]: {cleaned_response_text}"
+            asst_msg = utils.construct_assistant_message('openai', formatted_response_for_history)
+            initial_state.shared_history.extend([utils.construct_user_message('openai', user_msg_text, []), asst_msg])
+        else:
+            user_msg_text = f"Director to All: {prompt_text}"
+            user_msg_for_history = utils.construct_user_message('openai', user_msg_text, [])
+
+            result_queue = queue.Queue()
+            history_for_primary = utils.translate_history(initial_state.shared_history + [user_msg_for_history], primary_engine.name)
+            history_for_secondary = utils.translate_history(initial_state.shared_history + [user_msg_for_history], secondary_engine.name)
+
+            secondary_thread = threading.Thread(
+                target=_secondary_worker,
+                args=(secondary_engine, models[secondary_engine.name], history_for_secondary, initial_state.system_prompts[secondary_engine.name], initial_state.max_tokens, result_queue, srl_list)
+            )
+            secondary_thread.start()
+
+            print(f"\n{utils.ASSISTANT_PROMPT}[{primary_engine.name.capitalize()}]: {utils.RESET_COLOR}", end='', flush=True)
+            primary_response_streamed, _ = api_client.perform_chat_request(primary_engine, models[primary_engine.name], history_for_primary, initial_state.system_prompts[primary_engine.name], initial_state.max_tokens, stream=True, session_raw_logs=srl_list)
+            print("\n")
+
+            secondary_thread.join()
+            secondary_result = result_queue.get()
+            secondary_engine_name = secondary_result['engine_name']
+            secondary_response_cleaned_text = secondary_result['cleaned_text']
+            print(f"{utils.ASSISTANT_PROMPT}[{secondary_engine_name.capitalize()}]: {utils.RESET_COLOR}{secondary_response_cleaned_text}")
+
+            formatted_primary = f"[{primary_engine.name.capitalize()}]: {utils.clean_ai_response_text(primary_engine.name, primary_response_streamed)}"
+            formatted_secondary = f"[{secondary_engine_name.capitalize()}]: {secondary_response_cleaned_text}"
+            primary_msg = utils.construct_assistant_message('openai', formatted_primary)
+            secondary_msg = utils.construct_assistant_message('openai', formatted_secondary)
+            first_msg, second_msg = (primary_msg, secondary_msg) if primary_engine_name == 'openai' else (secondary_msg, primary_msg)
+            initial_state.shared_history.extend([user_msg_for_history, first_msg, second_msg])
+
+        try:
+            with open(log_filename, 'a', encoding='utf-8') as f:
+                history_slice_to_log = initial_state.shared_history[-3:] if 'Director to All' in utils.extract_text_from_message(initial_state.shared_history[-3]) else initial_state.shared_history[-2:]
+                f.write(json.dumps({"turn": turn_counter, "history_slice": history_slice_to_log}) + '\n')
+        except IOError as e:
+            log.warning("Could not write to session log file: %s", e)
+
+    try:
+        while True:
+            prompt_message = f"\n{utils.DIRECTOR_PROMPT}Director> {utils.RESET_COLOR}"
+            user_input = prompt(ANSI(prompt_message), history=cli_history)
+
+            if not user_input.strip():
+                sys.stdout.write('\x1b[1A\x1b[2K'); sys.stdout.flush()
+                continue
+            if user_input.lstrip().startswith('/'):
+                sys.stdout.write('\x1b[1A\x1b[2K'); sys.stdout.flush()
+                if _handle_multichat_slash_command(user_input, initial_state, cli_history):
+                    break
+            else:
+                process_turn(user_input)
+    except (KeyboardInterrupt, EOFError):
+        print("\nSession interrupted.")
+    finally:
+        print("\nSession ended.")
+        if initial_state.force_quit or initial_state.exit_without_memory:
+            return
+
+        if os.path.exists(log_filename) and initial_state.shared_history:
+            if initial_state.custom_log_rename:
+                new_filepath = log_filename.replace(os.path.basename(log_filename), f"{utils.sanitize_filename(initial_state.custom_log_rename)}.jsonl")
+                try:
+                    os.rename(log_filename, new_filepath)
+                    print(f"{utils.SYSTEM_MSG}--> Session log renamed to: {new_filepath}{utils.RESET_COLOR}")
+                except OSError as e:
+                    log.error("Failed to rename session log: %s", e)
 
         if initial_state.debug_active:
             debug_filename = f"debug_{os.path.splitext(log_filename_base)[0]}.jsonl"

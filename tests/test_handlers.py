@@ -12,13 +12,12 @@ import io
 import queue
 import os
 import logging
-import threading
 
 from aicli import handlers
 from aicli import config
 from aicli import api_client
 from aicli.engine import OpenAIEngine, GeminiEngine
-from aicli.session_manager import SessionState
+from aicli.session_manager import SessionState, MultiChatSessionState
 
 def test_handle_chat_single_shot(mocker, capsys):
     """
@@ -209,177 +208,59 @@ def test_handle_image_generation(mocker, fake_fs):
     with open(saved_files[0], 'rb') as f:
         assert f.read() == fake_image_bytes
 
-def test_secondary_worker_success(mocker):
-    """Tests that _secondary_worker successfully gets a response and puts it in the queue."""
-    mock_engine = MagicMock(spec=OpenAIEngine)
-    mock_engine.name = 'openai_mock_engine_string'
-    mock_perform_chat = mocker.patch(
-        'aicli.api_client.perform_chat_request',
-        return_value=("Secondary response.", {})
-    )
-    result_q = queue.Queue()
-    test_history = [{"role": "user", "content": "hello"}]
-
-    handlers._secondary_worker(mock_engine, "gpt-4o-mini", test_history, "system prompt", 100, result_q)
-
-    mock_perform_chat.assert_called_once_with(
-        mock_engine, "gpt-4o-mini", test_history, "system prompt", 100, stream=True, print_stream=False
-    )
-    assert result_q.get() == {'engine_name': 'openai_mock_engine_string', 'cleaned_text': 'Secondary response.'}
-
-def test_secondary_worker_api_error(mocker, caplog):
-    """Tests that _secondary_worker handles API errors and puts an error message in the queue."""
-    mock_engine = MagicMock(spec=OpenAIEngine)
-    mock_engine.name = 'openai_mock_engine_string'
-    mock_perform_chat = mocker.patch(
-        'aicli.api_client.perform_chat_request',
-        side_effect=Exception("API Call Failed")
-    )
-    result_q = queue.Queue()
-    test_history = [{"role": "user", "content": "hello"}]
-
-    with caplog.at_level(logging.ERROR):
-        handlers._secondary_worker(mock_engine, "gpt-4o-mini", test_history, "system prompt", 100, result_q)
-
-    mock_perform_chat.assert_called_once()
-    assert result_q.get() == {'engine_name': 'openai_mock_engine_string', 'cleaned_text': 'Error: Could not get response from openai_mock_engine_string.'}
-    assert ("aicli", logging.ERROR, "Secondary model thread failed: API Call Failed") in caplog.record_tuples
-
-
-class TestMultiChatHandlers:
+class TestMultiChatHandler:
     @pytest.fixture(autouse=True)
-    def setup_multichat_mocks(self, mocker, mock_prompt_toolkit):
+    def setup_multichat_mocks(self, mocker):
         mocker.patch('aicli.api_client.check_api_keys', return_value="fake_key")
         self.mock_openai_engine = MagicMock(spec=OpenAIEngine)
         self.mock_openai_engine.name = 'openai'
         self.mock_gemini_engine = MagicMock(spec=GeminiEngine)
         self.mock_gemini_engine.name = 'gemini'
+        # Patch get_engine where it is USED (in the handlers module), not where it is defined.
+        mocker.patch('aicli.handlers.get_engine', side_effect=lambda name, key: self.mock_openai_engine if name == 'openai' else self.mock_gemini_engine)
+        self.mock_perform_multichat = mocker.patch('aicli.handlers.perform_multichat_session')
 
-        mocker.patch('aicli.engine.get_engine', side_effect=lambda name, key: self.mock_openai_engine if name == 'openai' else self.mock_gemini_engine)
-
-        # Mock the settings dictionary directly where it is imported and used in the handlers module.
-        mocker.patch.dict(handlers.settings, {
-            'default_engine': 'openai',
-            'default_openai_chat_model': 'gpt-4o-mini',
-            'default_gemini_model': 'gemini-1.5-flash-latest'
-        })
-        self.mock_perform_chat = mocker.patch('aicli.api_client.perform_chat_request', return_value=("AI Response", {}))
-        self.mock_secondary_worker = mocker.patch('aicli.handlers._secondary_worker')
-
-        _original_threading_Thread = threading.Thread
-        def mock_thread_constructor(target, args=(), kwargs={}):
-            mock_instance = MagicMock(spec=_original_threading_Thread)
-            mock_instance.start.side_effect = lambda: target(*args, **kwargs)
-            mock_instance.join.return_value = None
-            return mock_instance
-        self.mock_thread = mocker.patch('threading.Thread', side_effect=mock_thread_constructor)
-
-        self.mock_queue = mocker.patch('queue.Queue')
-        self.mock_queue.return_value.get.return_value = {'engine_name': 'gemini', 'cleaned_text': 'Secondary AI Response'}
-        self.mock_log_file = mocker.patch('builtins.open', mocker.mock_open())
-
-        _original_os_path_join = os.path.join
-        mocker.patch('os.path.join', side_effect=lambda base, *args: _original_os_path_join(str(base), *[str(a) for a in args]))
-
-        mocker.patch('sys.stdout', new_callable=io.StringIO)
-        self.mock_prompt_toolkit = mock_prompt_toolkit
-
-    def test_handle_multichat_initial_prompt_both_called(self, mocker):
-        """Tests that an initial prompt in multi-chat mode calls both engines."""
-        self.mock_prompt_toolkit['input_queue'].append('/exit')
-
+    def test_handle_multichat_setup_and_delegation(self):
+        """
+        Tests that handle_multichat_session correctly initializes the state
+        and delegates to the session manager.
+        """
         handlers.handle_multichat_session(
-            initial_prompt="Hello multi-chat",
-            system_prompt="Global system prompt",
-            image_data=[],
-            session_name=None,
-            max_tokens=200,
+            initial_prompt="Hello",
+            system_prompt="Global prompt",
+            image_data=["image1"],
+            session_name="test_session",
+            max_tokens=500,
             debug_enabled=False
         )
 
-        self.mock_perform_chat.assert_called_once()
-        args, kwargs = self.mock_perform_chat.call_args
-        assert args[0].name == 'openai'
-        assert "Hello multi-chat" in args[2][0]['content'][0]['text']
-        assert "Global system prompt" in args[3]
-        assert "You are OpenAI only." in args[3]
+        self.mock_perform_multichat.assert_called_once()
+        call_args, _ = self.mock_perform_multichat.call_args
+        state: MultiChatSessionState = call_args[0]
+        session_name_arg = call_args[1]
 
-        self.mock_secondary_worker.assert_called_once()
-        args, kwargs = self.mock_secondary_worker.call_args
-        assert args[0].name == 'gemini'
-        assert "Hello multi-chat" in args[2][0]['parts'][0]['text']
-        assert "Global system prompt" in args[3]
-        assert "You are Gemini only." in args[3]
+        assert isinstance(state, MultiChatSessionState)
+        assert state.openai_engine == self.mock_openai_engine
+        assert state.gemini_engine == self.mock_gemini_engine
+        assert state.max_tokens == 500
+        assert "Global prompt" in state.system_prompts['openai']
+        assert "You are OpenAI only" in state.system_prompts['openai']
+        assert "Global prompt" in state.system_prompts['gemini']
+        assert "You are Gemini only" in state.system_prompts['gemini']
+        assert state.initial_image_data == ["image1"]
+        assert session_name_arg == "test_session"
 
-    def test_handle_multichat_broadcast_prompt_both_called(self, mocker):
-        """Tests that a broadcast user prompt in interactive multi-chat queries both engines."""
-        self.mock_prompt_toolkit['input_queue'].extend(['Test broadcast prompt', '/exit'])
+    def test_handle_multichat_missing_api_key_exits(self, mocker, caplog):
+        """
+        Tests that a missing API key during setup causes a clean exit.
+        """
+        mocker.patch('aicli.api_client.check_api_keys', side_effect=api_client.MissingApiKeyError("Missing Key"))
+        with pytest.raises(SystemExit) as excinfo, caplog.at_level(logging.ERROR):
+            handlers.handle_multichat_session(None, None, [], None, 100, False)
 
-        handlers.handle_multichat_session(
-            initial_prompt=None,
-            system_prompt=None,
-            image_data=[],
-            session_name=None,
-            max_tokens=200,
-            debug_enabled=False
-        )
-
-        assert self.mock_perform_chat.call_count == 1
-
-        args, kwargs = self.mock_perform_chat.call_args
-        assert args[0].name == 'openai'
-        assert "Director to All: Test broadcast prompt" in args[2][-1]['content'][0]['text']
-        assert "You are OpenAI only." in args[3]
-
-        self.mock_secondary_worker.assert_called_once()
-        args, kwargs = self.mock_secondary_worker.call_args
-        assert args[0].name == 'gemini'
-        assert "Director to All: Test broadcast prompt" in args[2][-1]['parts'][0]['text']
-        assert "You are Gemini only." in args[3]
-
-        log_content = "".join(call.args[0] for call in self.mock_log_file().write.call_args_list)
-        assert "Director to All: Test broadcast prompt" in log_content
-        assert "[Openai]: AI Response" in log_content
-        assert "[Gemini]: Secondary AI Response" in log_content
-
-    def test_handle_multichat_targeted_prompt_single_engine(self, mocker):
-        """Tests the /ai <engine> [prompt] command, ensuring only the specified engine is queried."""
-        self.mock_prompt_toolkit['input_queue'].extend(['/ai gemini targeted prompt', '/exit'])
-
-        handlers.handle_multichat_session(
-            initial_prompt=None,
-            system_prompt=None,
-            image_data=[],
-            session_name=None,
-            max_tokens=200,
-            debug_enabled=False
-        )
-
-        self.mock_perform_chat.assert_called_once()
-        args, kwargs = self.mock_perform_chat.call_args
-        assert args[0].name == 'gemini'
-        assert "Director to Gemini: targeted prompt" in args[2][-1]['parts'][0]['text']
-        assert "You are Gemini only." in args[3]
-
-        self.mock_secondary_worker.assert_not_called()
-
-        log_content = "".join(call.args[0] for call in self.mock_log_file().write.call_args_list)
-        assert "Director to Gemini: targeted prompt" in log_content
-        assert "[Gemini]: AI Response" in log_content
-        assert "[Openai]:" not in log_content
-
-
-    def test_handle_multichat_missing_api_key_on_startup_exits(self, mocker, caplog):
-        """Tests startup behavior when an API key for multi-chat is missing, expecting a system exit."""
-        mocker.patch('aicli.api_client.check_api_keys', side_effect=[api_client.MissingApiKeyError("Missing OpenAI Key")])
-
-        with pytest.raises(SystemExit) as excinfo:
-            handlers.handle_multichat_session(
-                initial_prompt="Test", system_prompt=None, image_data=[], session_name=None, max_tokens=200, debug_enabled=False
-            )
         assert excinfo.value.code == 1
-        assert ("aicli", logging.ERROR, "Missing OpenAI Key") in caplog.record_tuples
-
+        assert "Missing Key" in caplog.text
+        self.mock_perform_multichat.assert_not_called()
 
 class TestSelectModel:
     @pytest.fixture(autouse=True)

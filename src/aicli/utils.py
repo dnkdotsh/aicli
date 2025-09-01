@@ -306,6 +306,15 @@ def format_token_string(token_dict: dict) -> str:
     r = r_api if r_api > 0 else max(0, t - (p + c))
     return f"\n{SYSTEM_MSG}[P:{p}/C:{c}/R:{r}/T:{t}]{RESET_COLOR}"
 
+def clean_ai_response_text(engine_name: str, raw_response: str) -> str:
+    """
+    Strips any self-labels the AI might have added despite system prompts,
+    returning only the cleaned response text without any client-side prefix.
+    """
+    ai_label_pattern = re.compile(r"^\[" + re.escape(engine_name.capitalize()) + r"\]:?\s*", re.IGNORECASE)
+    cleaned_response = ai_label_pattern.sub("", raw_response.lstrip())
+    return cleaned_response
+
 def display_help(context: str):
     """Displays help information for the given context (chat or multichat)."""
     if context == 'chat':
@@ -345,10 +354,23 @@ Interactive Chat Commands:
     elif context == 'multichat':
         help_text = """
 Multi-Chat Commands:
-  /exit                     End the current session.
+  /exit [name]              End the session. Optionally provide a name for the log file.
+  /quit                     Exit immediately without saving.
   /help                     Display this help message.
   /history                  Print the JSON of the shared conversation history.
+  /debug                    Toggle session-specific raw API logging.
+  /memory                   View the content of the persistent memory file.
+  /remember [text]          If text, inject into memory. If no text, consolidate chat.
+  /clear                    Clear the current conversation history.
+  /state                    Print the current session state.
+  /save <name> [--stay] [--remember]
+                            Save the session. A name is required.
+                            --stay:      Do not exit after saving.
+                            --remember:  Update persistent memory before saving.
+  /model <gpt|gem> <name>   Change the model for the specified engine.
+  /set [key] [val]          Change a global setting.
+  /max-tokens <num>         Set max output tokens for the session.
   /ai <gpt|gem> [prompt]    Send a targeted prompt to only one AI.
-                            If no prompt is given, the AI is asked to continue.
+                            If no prompt, the AI is asked to continue.
 """
     print(help_text)
