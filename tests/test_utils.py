@@ -28,6 +28,26 @@ class TestUtils:
         assert utils.sanitize_filename("...///") == "unnamed_log"
         assert utils.sanitize_filename("fïlëñåmë_wïth_ünîcödë") == "fïlëñåmë_wïth_ünîcödë" # Keep Unicode as per current implementation's regex
 
+    @pytest.mark.parametrize("filename, expected", [
+        # Standard extensions
+        ("file.txt", True),
+        ("script.py", True),
+        # Supported extensionless files (case-insensitive)
+        ("Dockerfile", True),
+        ("makefile", True),
+        ("Jenkinsfile", True),
+        # Unsupported extensionless files
+        ("unknownfile", False),
+        ("mybinary", False),
+        # Unsupported extensions
+        ("archive.zip", False),
+        ("image.png", False),
+    ])
+    def test_is_supported_text_file(self, filename, expected):
+        """Tests the is_supported_text_file logic for various filenames."""
+        path = Path(f"/test/{filename}")
+        assert utils.is_supported_text_file(path) == expected
+
     def test_construct_user_message_openai(self):
         """Tests user message construction for the OpenAI engine."""
         msg = utils.construct_user_message('openai', 'test prompt', [])

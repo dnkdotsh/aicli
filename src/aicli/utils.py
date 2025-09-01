@@ -45,6 +45,9 @@ SUPPORTED_TEXT_EXTENSIONS = {
     '.jsonl', 'diff', 'log',
 }
 SUPPORTED_IMAGE_MIMETYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+SUPPORTED_EXTENSIONLESS_FILENAMES = {
+    'dockerfile', 'makefile', 'vagrantfile', 'jenkinsfile', 'procfile', 'rakefile', '.gitignore'
+}
 
 def read_system_prompt(prompt_or_path: str) -> str:
     """Reads a system prompt from a file path or returns the string directly."""
@@ -62,8 +65,13 @@ def ensure_dir_exists(directory_path: Path):
         sys.exit(1)
 
 def is_supported_text_file(filepath: Path) -> bool:
-    """Check if a file is a supported text file based on its extension."""
-    return filepath.suffix.lower() in SUPPORTED_TEXT_EXTENSIONS
+    """Check if a file is a supported text file based on its extension or name."""
+    if filepath.suffix.lower() in SUPPORTED_TEXT_EXTENSIONS:
+        return True
+    # If there's no extension, check against the list of known filenames.
+    if not filepath.suffix:
+        return filepath.name.lower() in SUPPORTED_EXTENSIONLESS_FILENAMES
+    return False
 
 def is_supported_image_file(filepath: Path) -> bool:
     """Check if a file is a supported image file based on its MIME type."""

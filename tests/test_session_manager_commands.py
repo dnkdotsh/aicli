@@ -59,6 +59,19 @@ class TestSessionManagerFileCommands:
         assert "user has attached" in utils.extract_text_from_message(mock_session_state.history[-1])
         assert "app.py" in utils.extract_text_from_message(mock_session_state.history[-1])
 
+    def test_command_attach_extensionless_file_success(self, mock_session_state, fake_fs):
+        """Tests that /attach successfully adds a supported extensionless file."""
+        dockerfile = Path("/test/Dockerfile")
+        fake_fs.create_file(dockerfile, contents="FROM python:3.10")
+
+        should_exit = _handle_slash_command(f"/attach {dockerfile}", mock_session_state, MagicMock())
+
+        assert not should_exit
+        assert dockerfile.resolve() in mock_session_state.attachments
+        assert mock_session_state.attachments[dockerfile.resolve()] == "FROM python:3.10"
+        assert "user has attached" in utils.extract_text_from_message(mock_session_state.history[-1])
+        assert "Dockerfile" in utils.extract_text_from_message(mock_session_state.history[-1])
+
     def test_command_attach_file_not_found(self, mock_session_state, capsys):
         """Tests that /attach handles non-existent files gracefully."""
         initial_attachment_count = len(mock_session_state.attachments)
