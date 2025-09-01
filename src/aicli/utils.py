@@ -39,7 +39,7 @@ DIRECTOR_PROMPT = "\033[95m" # Bright Magenta
 RESET_COLOR = "\033[0m"
 
 SUPPORTED_TEXT_EXTENSIONS = {
-    '.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.yaml', '.yml',
+    '.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.yaml', '.yml', 'jsonl',
     '.csv', '.sh', '.bash', '.c', '.cpp', '.h', '.hpp', '.java', '.go', '.rs', '.php',
     '.rb', '.pl', '.sql', '.r', '.swift', '.kt', '.scala', '.ts', '.tsx', '.jsx', '.vue'
 }
