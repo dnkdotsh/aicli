@@ -331,6 +331,8 @@ Interactive Chat Commands:
   /load <filename>  Load a session, replacing the current one.
   /engine [name]    Switch AI engine (openai/gemini). Translates history.
   /model [name]     Select a new model for the current engine.
+  /persona <name>   Switch to a different persona. Use `/persona clear` to remove.
+  /personas         List all available personas.
   /set [key] [val]  Change a setting (e.g., /set stream false).
                     Run without arguments to list all settings.
   /max-tokens [num] Set max tokens for the session.

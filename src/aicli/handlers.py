@@ -4,6 +4,7 @@
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
+
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 # This program is distributed in the hope that it will be useful,
@@ -33,6 +34,7 @@ import re # Added for regex for _format_multichat_response
 from . import config
 from . import api_client
 from . import utils
+from . import personas as persona_manager
 from .engine import AIEngine, get_engine
 from .session_manager import perform_interactive_chat, SessionState
 from .settings import settings
@@ -85,7 +87,7 @@ def select_model(engine: AIEngine, task: str) -> str:
     print(f"Invalid selection. Using default: {default_model}")
     return default_model
 
-def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt: str, image_data: list, attachments: dict, session_name: str, max_tokens: int, stream: bool, memory_enabled: bool, debug_enabled: bool):
+def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt: str, image_data: list, attachments: dict, session_name: str, max_tokens: int, stream: bool, memory_enabled: bool, debug_enabled: bool, initial_system_prompt: str | None, persona: persona_manager.Persona | None):
     """Handles both single-shot and interactive chat sessions."""
     if initial_prompt:
         # For single-shot chat, we must pre-assemble the full system prompt
@@ -112,6 +114,8 @@ def handle_chat(engine: AIEngine, model: str, system_prompt: str, initial_prompt
             engine=engine,
             model=model,
             system_prompt=system_prompt,
+            initial_system_prompt=initial_system_prompt,
+            current_persona=persona,
             attached_images=image_data,
             attachments=attachments,
             stream_active=stream,

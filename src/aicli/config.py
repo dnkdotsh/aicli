@@ -30,6 +30,9 @@ LOG_DIRECTORY = DATA_DIR / "logs"
 IMAGE_DIRECTORY = DATA_DIR / "images"
 SESSIONS_DIRECTORY = DATA_DIR / "sessions"
 
+# --- Config Directories (under CONFIG_DIR) ---
+PERSONAS_DIRECTORY = CONFIG_DIR / "personas"
+
 # --- Specific File Paths ---
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 IMAGE_LOG_FILE = LOG_DIRECTORY / "image_log.jsonl"

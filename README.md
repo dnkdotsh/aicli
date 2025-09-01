@@ -3,6 +3,7 @@
 A flexible and robust command-line interface for interacting with multiple AI models, including OpenAI (GPT series) and Google (Gemini series).
 
 - **Multi-Engine Chat**: Engage with OpenAI or Gemini, or have them respond to the same prompt simultaneously for comparative analysis.
+- **Reusable Personas**: Define and switch between different AI "personas" with pre-configured system prompts, models, and settings for different tasks.
 - **Dynamic Context Control**: Attach, detach, list, and refresh local files, directories, or even zip archives mid-conversation to provide deep, evolving context.
 - **Powerful Memory System**: Leverage a long-term memory file that the AI learns from across sessions. View, inject facts into, or consolidate conversations into memory on the fly.
 - **Full Session Management**: Save your interactive sessions to a file and resume them later, preserving the full conversation history, model state, and context.
@@ -57,6 +58,23 @@ User-configurable settings (like default models and token limits) are stored in 
 -   **Location:** `~/.config/aicli/settings.json`
 -   This file is created automatically on the first run. You can edit it directly or manage settings from within an interactive session using `/set`.
 
+### 3. Personas
+A "persona" is a reusable configuration saved as a JSON file. It allows you to pre-define the system prompt, AI model, and other settings for specific tasks.
+
+-   **Location:** `~/.config/aicli/personas/`
+-   This directory is created on the first run with a default `aicli_assistant.json` persona. You can create as many `.json` files as you need.
+
+An example `code_reviewer.json` file might look like this:
+```json
+{
+  "name": "Code Reviewer",
+  "description": "A meticulous code reviewer that focuses on bugs and best practices.",
+  "engine": "openai",
+  "model": "gpt-4o",
+  "system_prompt": "You are an expert code reviewer. Analyze the provided code for logical errors, security vulnerabilities, and deviations from best practices. Provide your feedback in a structured list, citing specific line numbers. Be concise and direct."
+}
+```
+
 ---
 
 ## Usage
@@ -72,6 +90,7 @@ If no command is specified, `chat` is assumed.
 
 ```
 aicli [-e {openai,gemini}] [-m MODEL] [--system-prompt PROMPT_OR_PATH]
+      [-P PERSONA]
       [-c | -i | -b [PROMPT] | -l FILEPATH]
       [-p PROMPT] [-f PATH] [-x PATH] [--memory]
       [-s NAME] [--stream | --no-stream] [--max-tokens INT] [--debug]
@@ -85,7 +104,8 @@ aicli [-e {openai,gemini}] [-m MODEL] [--system-prompt PROMPT_OR_PATH]
 
 #### Context & Input Arguments
 -   `-p, --prompt PROMPT`: A single, non-interactive prompt.
--   `--system-prompt PROMPT_OR_PATH`: Provide a system instruction as a string or a path to a text file.
+-   `-P, --persona PERSONA`: Start the session with a specific persona.
+-   `--system-prompt PROMPT_OR_PATH`: Provide a system instruction as a string or a path to a text file. Overrides a persona's system prompt.
 -   `-f, --file PATH`: Attach a file or directory. Can be used multiple times.
 -   `-x, --exclude PATH`: Exclude a file or directory from being processed.
 -   `--memory`: Toggles the use of persistent memory for the session (reverses the default in `settings.json`).
@@ -110,6 +130,11 @@ aicli review ~/.local/share/aicli/sessions/my_session.json
 aicli
 ```
 
+**Start a session with a specific persona:**
+```bash
+aicli -P code_reviewer -f ./src/
+```
+
 **Ask a single-shot question without entering interactive mode:**
 ```bash
 aicli -p "What is the capital of Nebraska?"
@@ -132,15 +157,14 @@ aicli -i -p "A photorealistic image of a red panda programming on a laptop"
 
 **Have a dynamic interactive session:**
 ```bash
-# Start an interactive session
-aicli
-
-# Inside the session, attach a file and ask a question
-You: /attach ./src/main.py
-You: Review this code for me and suggest improvements.
+# Start an interactive session with the default persona
+aicli -P aicli_assistant
+You: How do I save a session?
 ...
-# After getting feedback, remember a key detail for later
-You: /remember The project codename is 'Bluebird'
+# Switch personas mid-conversation
+You: /persona code_reviewer
+You: /attach ./src/main.py
+You: Review this code for me.
 ...
 # Exit the session, giving the log a specific name
 You: /exit main_py_review
@@ -175,6 +199,8 @@ During an interactive chat session, type these commands instead of a prompt:
 #### **AI & Model Control**
 -   `/engine [name]`: Switch between `openai` and `gemini`. The history is automatically translated.
 -   `/model [name]`: Change the model for the current engine.
+-   `/persona <name>`: Switch to a different persona. Use `/persona clear` to remove it.
+-   `/personas`: List all available personas from your configuration directory.
 -   `/stream`: Toggle response streaming on or off for the current session.
 -   `/max-tokens <num>`: Set the max output tokens for the current session.
 -   `/debug`: Toggle raw API logging for the current session.
@@ -186,7 +212,7 @@ During an interactive chat session, type these commands instead of a prompt:
 
 -   `src/aicli/`: Contains all application source code.
 -   `tools/`: Contains utility scripts for packaging and development.
--   `~/.config/aicli/`: Stores the user `settings.json` file.
+-   `~/.config/aicli/`: Stores the user `settings.json` file and the `personas/` directory.
 -   `~/.local/share/aicli/`: Stores all application data:
     -   `logs/`: Contains session chats, raw API calls, and debug logs.
     -   `images/`: Where generated images are saved.

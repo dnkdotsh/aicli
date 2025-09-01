@@ -30,6 +30,7 @@ from . import config
 from . import api_client
 from . import utils
 from . import settings as app_settings
+from . import personas as persona_manager
 from .engine import AIEngine, get_engine
 from .logger import log
 from .prompts import (HISTORY_SUMMARY_PROMPT, MEMORY_INTEGRATION_PROMPT,
@@ -52,6 +53,8 @@ class SessionState:
     engine: AIEngine
     model: str
     system_prompt: str | None
+    initial_system_prompt: str | None # The original system prompt from startup
+    current_persona: persona_manager.Persona | None
     max_tokens: int | None
     memory_enabled: bool
     attachments: dict = field(default_factory=dict) # Maps Path object to file content string
@@ -111,7 +114,12 @@ def _save_session_to_file(state: SessionState, filename: str) -> bool:
     state_dict = asdict(state)
     state_dict['engine_name'] = state.engine.name
     del state_dict['engine']
+    # Convert non-serializable types to strings for saving
     state_dict['attachments'] = {str(k): v for k, v in state.attachments.items()}
+    if state.current_persona:
+        state_dict['current_persona'] = state.current_persona.filename
+    else:
+        state_dict['current_persona'] = None
 
 
     try:
@@ -140,6 +148,10 @@ def load_session_from_file(filepath: Path) -> SessionState | None:
             del data['attached_text_files']
         if 'initial_image_data' in data:
             data['attached_images'] = data.pop('initial_image_data')
+
+        # Load persona object from its filename
+        if 'current_persona' in data and data['current_persona']:
+            data['current_persona'] = persona_manager.load_persona(data['current_persona'])
 
         data.pop('force_quit', None)
         data.pop('custom_log_rename', None)
@@ -286,6 +298,10 @@ def _handle_command_history(args: list, state: SessionState, cli_history: InMemo
 
 def _handle_command_state(args: list, state: SessionState, cli_history: InMemoryHistory):
     print(f"{utils.SYSTEM_MSG}--- Session State ---{utils.RESET_COLOR}")
+    if state.current_persona:
+        print(f"  Active Persona: {state.current_persona.name} ({state.current_persona.filename})")
+    else:
+        print(f"  Active Persona: None")
     print(f"  Engine: {state.engine.name}")
     print(f"  Model: {state.model}")
     print(f"  Max Tokens: {state.max_tokens or 'Default'}")
@@ -436,6 +452,74 @@ def _handle_command_detach(args: list, state: SessionState, cli_history: InMemor
     else:
         print(f"{utils.SYSTEM_MSG}--> No attached file found with the name '{search_term}'.{utils.RESET_COLOR}")
 
+def _handle_command_personas(args: list, state: SessionState, cli_history: InMemoryHistory):
+    """Lists available personas."""
+    personas = persona_manager.list_personas()
+    if not personas:
+        print(f"{utils.SYSTEM_MSG}--> No personas found in {config.PERSONAS_DIRECTORY}.{utils.RESET_COLOR}")
+        return
+
+    print(f"{utils.SYSTEM_MSG}--- Available Personas ---{utils.RESET_COLOR}")
+    for p in personas:
+        print(f"  - {p.filename.replace('.json', '')}: {p.description}")
+    print(f"{utils.SYSTEM_MSG}------------------------{utils.RESET_COLOR}")
+
+def _handle_command_persona(args: list, state: SessionState, cli_history: InMemoryHistory):
+    """Switches to or clears a persona."""
+    if not args:
+        print(f"{utils.SYSTEM_MSG}--> Usage: /persona <name> OR /persona clear{utils.RESET_COLOR}")
+        return
+
+    command = args[0].lower()
+    if command == 'clear':
+        if not state.current_persona:
+            print(f"{utils.SYSTEM_MSG}--> No active persona to clear.{utils.RESET_COLOR}")
+            return
+
+        state.system_prompt = state.initial_system_prompt
+        state.current_persona = None
+        print(f"{utils.SYSTEM_MSG}--> Persona cleared. System prompt reverted to its original state for this session.{utils.RESET_COLOR}")
+        notification_text = "[SYSTEM] The current persona has been cleared. Default instructions are now in effect."
+        state.history.append(utils.construct_user_message(state.engine.name, notification_text, []))
+        return
+
+    # Load and apply the new persona
+    persona_name = ' '.join(args)
+    new_persona = persona_manager.load_persona(persona_name)
+    if not new_persona:
+        print(f"{utils.SYSTEM_MSG}--> Persona '{persona_name}' not found or is invalid.{utils.RESET_COLOR}")
+        return
+
+    # Apply engine if specified and different
+    if new_persona.engine and new_persona.engine != state.engine.name:
+        try:
+            new_api_key = api_client.check_api_keys(new_persona.engine)
+            state.history = utils.translate_history(state.history, new_persona.engine)
+            state.engine = get_engine(new_persona.engine, new_api_key)
+            # Use persona model, or default for new engine
+            default_model_key = 'default_openai_chat_model' if new_persona.engine == 'openai' else 'default_gemini_model'
+            state.model = new_persona.model or app_settings.settings[default_model_key]
+            print(f"{utils.SYSTEM_MSG}--> Engine switched to {state.engine.name.capitalize()} as per persona '{new_persona.name}'.{utils.RESET_COLOR}")
+        except api_client.MissingApiKeyError:
+            print(f"{utils.SYSTEM_MSG}--> Could not switch to persona engine '{new_persona.engine}': API key not found. Aborting.{utils.RESET_COLOR}")
+            return
+
+    # Apply model if specified (and engine didn't just change it)
+    elif new_persona.model:
+        state.model = new_persona.model
+
+    # Apply other optional settings
+    if new_persona.max_tokens is not None: state.max_tokens = new_persona.max_tokens
+    if new_persona.stream is not None: state.stream_active = new_persona.stream
+
+    # Apply system prompt and set current persona
+    state.system_prompt = new_persona.system_prompt
+    state.current_persona = new_persona
+
+    print(f"{utils.SYSTEM_MSG}--> Switched to persona: '{new_persona.name}'{utils.RESET_COLOR}")
+    notification_text = f"[SYSTEM] Persona changed to '{new_persona.name}'. New instructions are now in effect."
+    state.history.append(utils.construct_user_message(state.engine.name, notification_text, []))
+
 
 # --- Command Dispatcher ---
 
@@ -460,6 +544,8 @@ COMMAND_MAP = {
     '/files': _handle_command_files,
     '/attach': _handle_command_attach,
     '/detach': _handle_command_detach,
+    '/personas': _handle_command_personas,
+    '/persona': _handle_command_persona,
 }
 
 def _handle_slash_command(user_input: str, state: SessionState, cli_history: InMemoryHistory) -> bool:
@@ -490,7 +576,8 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
     print("Type '/help' for commands or '/exit' to end.")
     print(f"Session log will be saved to: {log_filename}")
 
-    if initial_state.system_prompt: print(f"{utils.SYSTEM_MSG}System prompt is active.{utils.RESET_COLOR}")
+    if initial_state.current_persona: print(f"{utils.SYSTEM_MSG}Active Persona: {initial_state.current_persona.name}.{utils.RESET_COLOR}")
+    if initial_state.system_prompt and not initial_state.current_persona: print(f"{utils.SYSTEM_MSG}System prompt is active.{utils.RESET_COLOR}")
     if initial_state.attachments:
         total_size = sum(p.stat().st_size for p in initial_state.attachments.keys() if p.exists())
         print(f"{utils.SYSTEM_MSG}Attached {len(initial_state.attachments)} text file(s). Total size: {_format_bytes(total_size)}{utils.RESET_COLOR}")
