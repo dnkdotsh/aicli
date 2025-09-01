@@ -23,6 +23,7 @@ import base64
 import re
 import datetime
 import zipfile
+import tarfile
 import mimetypes
 import requests # Added for requests.exceptions.RequestException
 from pathlib import Path
@@ -42,9 +43,10 @@ SUPPORTED_TEXT_EXTENSIONS = {
     '.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.yaml', '.yml',
     '.csv', '.sh', '.bash', '.c', '.cpp', '.h', '.hpp', '.java', '.go', '.rs', '.php',
     '.rb', '.pl', '.sql', '.r', '.swift', '.kt', '.scala', '.ts', '.tsx', '.jsx', '.vue',
-    '.jsonl', '.diff', '.log',
+    '.jsonl', '.diff', '.log', '.toml'
 }
 SUPPORTED_IMAGE_MIMETYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+SUPPORTED_ARCHIVE_EXTENSIONS = {'.zip', '.tar', '.gz', '.tgz'}
 SUPPORTED_EXTENSIONLESS_FILENAMES = {
     'dockerfile', 'makefile', 'vagrantfile', 'jenkinsfile', 'procfile', 'rakefile', '.gitignore',
     'license'
@@ -73,6 +75,11 @@ def is_supported_text_file(filepath: Path) -> bool:
     if not filepath.suffix:
         return filepath.name.lower() in SUPPORTED_EXTENSIONLESS_FILENAMES
     return False
+
+def is_supported_archive_file(filepath: Path) -> bool:
+    """Check if a file is a supported archive file."""
+    # Handles multi-part extensions like .tar.gz
+    return any(filepath.name.lower().endswith(ext) for ext in SUPPORTED_ARCHIVE_EXTENSIONS)
 
 def is_supported_image_file(filepath: Path) -> bool:
     """Check if a file is a supported image file based on its MIME type."""
@@ -137,6 +144,28 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
         except (zipfile.BadZipFile, IOError) as e:
             log.warning("Could not process zip file %s: %s", zip_path, e)
 
+    def process_tar_file(tar_path: Path):
+        """Helper to process text files within a tar archive."""
+        try:
+            with tarfile.open(tar_path, 'r:*') as t:  # 'r:*' auto-detects compression
+                tar_content_parts = []
+                for member in t.getmembers():
+                    if not member.isfile():
+                        continue
+                    member_path = Path(member.name)
+                    if member_path.name in {p.name for p in exclusion_paths}:
+                        continue
+                    if is_supported_text_file(member_path):
+                        file_obj = t.extractfile(member)
+                        if file_obj:
+                            content = file_obj.read().decode('utf-8', errors='ignore')
+                            tar_content_parts.append(f"--- FILE (from {tar_path.name}): {member.name} ---\n{content}")
+                if tar_content_parts:
+                    attachments_dict[tar_path] = "\n\n".join(tar_content_parts)
+        except (tarfile.TarError, IOError) as e:
+            log.warning("Could not process tar file %s: %s", tar_path, e)
+
+
     for p_str in paths:
         path_obj = Path(p_str).resolve()
 
@@ -147,8 +176,11 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
             continue
 
         if path_obj.is_file():
-            if path_obj.suffix.lower() == '.zip':
-                process_zip_file(path_obj)
+            if is_supported_archive_file(path_obj):
+                if path_obj.suffix.lower() == '.zip':
+                    process_zip_file(path_obj)
+                else: # Handles .tar, .tar.gz, .tgz
+                    process_tar_file(path_obj)
             elif is_supported_text_file(path_obj):
                 process_text_file(path_obj)
             elif is_supported_image_file(path_obj):

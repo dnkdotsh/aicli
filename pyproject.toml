@@ -1,34 +1,44 @@
-# pyproject.toml
-
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "aicli"
-version = "0.0.5"
-description = "A unified command-line client for OpenAI and Google Gemini."
+version = "1.0.0"
+authors = [
+  { name="Dank A. Saurus", email="contact@dank.ninja" },
+]
+description = "A flexible and robust command-line interface for interacting with multiple AI models."
 readme = "README.md"
+license = { file="LICENSE" }
 requires-python = ">=3.10"
-license = { text = "GNU General Public License v3.0" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Utilities",
+]
 dependencies = [
     "requests",
     "prompt-toolkit",
-    "python-dotenv"
-]
-
-[project.optional-dependencies]
-test = [
-    "pytest",
-    "pyfakefs",
-    "pytest-mock"
+    "python-dotenv",
+    "platformdirs",
 ]
 
 [project.scripts]
 aicli = "aicli.aicli:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-mocker",
+    "pyfakefs",
+]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = [
+  "src"
+]

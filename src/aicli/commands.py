@@ -456,8 +456,20 @@ def handle_attach(args: list, state: "SessionState", cli_history: InMemoryHistor
         except (IOError, UnicodeDecodeError) as e:
             log.warning("Failed to attach file '%s': %s", path.name, e)
             print(f"{utils.SYSTEM_MSG}--> Error reading file '{path.name}': {e}{utils.RESET_COLOR}")
+    elif utils.is_supported_archive_file(path):
+        print(f"{utils.SYSTEM_MSG}--> Processing archive: {path.name}...{utils.RESET_COLOR}")
+        _, new_attachments, _ = utils.process_files([str(path)], use_memory=False, exclusions=[])
+        if new_attachments:
+            state.attachments.update(new_attachments)
+            # Estimate size from the first (and only) value in the new attachments dict
+            content_size = len(next(iter(new_attachments.values()), '').encode('utf-8'))
+            print(f"{utils.SYSTEM_MSG}--> Attached content from archive: {path.name} ({_format_bytes(content_size)}){utils.RESET_COLOR}")
+            notification_text = f"[SYSTEM] The user has attached and processed the archive: {path.name}."
+            state.history.append(utils.construct_user_message(state.engine.name, notification_text, []))
+        else:
+            print(f"{utils.SYSTEM_MSG}--> No supported text files found within the archive: {path.name}{utils.RESET_COLOR}")
     else:
-        print(f"{utils.SYSTEM_MSG}--> Error: File type '{path.suffix}' is not supported for attachment.{utils.RESET_COLOR}")
+        print(f"{utils.SYSTEM_MSG}--> Error: File type '{''.join(path.suffixes)}' is not supported for attachment.{utils.RESET_COLOR}")
 
 def handle_detach(args: list, state: "SessionState", cli_history: InMemoryHistory):
     if not args:

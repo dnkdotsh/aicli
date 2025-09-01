@@ -18,12 +18,25 @@
 
 import os
 from pathlib import Path
+import platformdirs
+
+APP_NAME = "aicli"
+APP_AUTHOR = "DankASaurus" # Optional, but good practice for platformdirs
 
 # Base directory for user-specific configuration files.
-CONFIG_DIR = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'aicli'
+# Uses OS-native paths:
+# - Windows: C:\Users\<user>\AppData\Roaming\DankASaurus\aicli
+# - macOS:   ~/Library/Application Support/aicli
+# - Linux:   ~/.config/aicli (or XDG_CONFIG_HOME)
+CONFIG_DIR = Path(platformdirs.user_config_dir(APP_NAME, APP_AUTHOR))
 
 # Base directory for all application-generated data files.
-DATA_DIR = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'aicli'
+# Uses OS-native paths:
+# - Windows: C:\Users\<user>\AppData\Local\DankASaurus\aicli
+# - macOS:   ~/Library/Application Support/aicli
+# - Linux:   ~/.local/share/aicli (or XDG_DATA_HOME)
+DATA_DIR = Path(platformdirs.user_data_dir(APP_NAME, APP_AUTHOR))
+
 
 # --- Log and Data Directories (under DATA_DIR) ---
 LOG_DIRECTORY = DATA_DIR / "logs"

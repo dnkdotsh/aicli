@@ -1,8 +1,11 @@
 # requirements.txt
-certifi==2024.7.4
-charset-normalizer==3.3.2
-idna==3.7
-requests==2.32.3
-urllib3==2.2.2
+
+# --- Core Application Dependencies ---
+requests
 prompt-toolkit
 python-dotenv
+platformdirs
+
+# --- Optional Testing Dependencies ---
+# Install with: pip install -r requirements.txt -r requirements-test.txt
+# Or via pyproject.toml: pip install ".[test]"

@@ -7,6 +7,7 @@ These tests focus on data manipulation, file processing, and message formatting.
 import pytest
 import os
 import zipfile
+import tarfile
 import base64
 import io
 import re # Added for regex assertion
@@ -193,6 +194,52 @@ class TestUtils:
         assert "images/pic.png" not in attachments[zip_path] # Binary should be ignored
         assert "excluded/temp.txt" not in attachments[zip_path] # Excluded by name
         assert not images # Images in zip files are not supported this way for now
+
+    def test_process_files_with_tar_archive(self, fake_fs):
+        """Tests processing text files within a .tar.gz archive."""
+        tar_path = Path("/my_archive.tar.gz")
+
+        # Create an in-memory tar.gz file
+        tar_buffer = io.BytesIO()
+        with tarfile.open(fileobj=tar_buffer, mode='w:gz') as tar:
+            # Add a supported text file
+            py_content = b"print('hello from tar')"
+            py_info = tarfile.TarInfo(name="code/script.py")
+            py_info.size = len(py_content)
+            tar.addfile(py_info, io.BytesIO(py_content))
+
+            # Add an unsupported file type
+            png_content = b"fake_png_data"
+            png_info = tarfile.TarInfo(name="images/pic.png")
+            png_info.size = len(png_content)
+            tar.addfile(png_info, io.BytesIO(png_content))
+
+            # Add a file to be excluded by name
+            log_content = b"excluded log content"
+            log_info = tarfile.TarInfo(name="excluded.log")
+            log_info.size = len(log_content)
+            tar.addfile(log_info, io.BytesIO(log_content))
+
+        # Write the buffer to the fake filesystem
+        fake_fs.create_file(tar_path, contents=tar_buffer.getvalue())
+
+        mem, attachments, images = utils.process_files(
+            paths=[str(tar_path)],
+            use_memory=False,
+            exclusions=['excluded.log']  # Exclude by name
+        )
+
+        assert mem is None
+        assert tar_path in attachments
+        # Check that the python script was included
+        assert "--- FILE (from my_archive.tar.gz): code/script.py ---\nprint('hello from tar')" in attachments[tar_path]
+        # Check that the unsupported file was ignored
+        assert "images/pic.png" not in attachments[tar_path]
+        # Check that the excluded file was ignored
+        assert "excluded.log" not in attachments[tar_path]
+        # Check that there is only one file included
+        assert attachments[tar_path].count("--- FILE") == 1
+        assert not images
 
     def test_process_files_no_memory_enabled(self, fake_fs):
         """Tests that persistent memory content is not loaded when use_memory is False."""
