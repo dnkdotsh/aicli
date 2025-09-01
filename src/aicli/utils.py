@@ -46,7 +46,7 @@ SUPPORTED_TEXT_EXTENSIONS = {
 }
 SUPPORTED_IMAGE_MIMETYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
 SUPPORTED_EXTENSIONLESS_FILENAMES = {
-    'dockerfile', 'makefile', 'vagrantfile', 'jenkinsfile', 'procfile', 'rakefile', '.gitignore'
+    'dockerfile', 'makefile', 'vagrantfile', 'jenkinsfile', 'procfile', 'rakefile'
 }
 
 def read_system_prompt(prompt_or_path: str) -> str:
