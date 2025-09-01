@@ -135,4 +135,4 @@ class TestApiClient:
         assert response_text == "" # Expect empty string for streaming error
         assert tokens == {'prompt': 0, 'completion': 0, 'reasoning': 0, 'total': 0}
         captured = capsys.readouterr()
-        assert "Stream interrupted: Stream connection reset" in captured.out # Should log the error
+        assert "--> Stream interrupted by network/API error: Stream connection reset" in captured.out

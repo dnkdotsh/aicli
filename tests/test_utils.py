@@ -285,7 +285,7 @@ class TestUtils:
         assert tokens == {'prompt': 0, 'completion': 0, 'reasoning': 0, 'total': 0} # Token counts might be incomplete
         captured = capsys.readouterr()
         assert "Partial" in captured.out
-        assert "Stream interrupted: Network error" in captured.out
+        assert "--> Stream interrupted by network/API error: Network error" in captured.out
 
     def test_parse_token_counts_openai(self):
         """Tests parsing token counts from a non-streaming OpenAI response."""

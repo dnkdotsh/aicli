@@ -170,7 +170,7 @@ def process_files(paths: list | None, use_memory: bool, exclusions: list | None)
     return memory_str, attachments_dict, image_data_parts
 
 def sanitize_filename(name: str) -> str:
-    """
+    r"""
     Sanitizes a string to be a valid filename.
     Allows unicode word characters as regex \w (default) includes them.
     """
@@ -289,8 +289,12 @@ def process_stream(engine: str, response: Any, print_stream: bool = True) -> Tup
                         r = data['usageMetadata'].get('cachedContentTokenCount', 0)
                         t = data['usageMetadata'].get('totalTokenCount', 0)
                 except (json.JSONDecodeError, IndexError): continue
+    except KeyboardInterrupt:
+        if print_stream:
+            # A newline is needed to move the cursor to the next line after the partial response.
+            print(f"\n{SYSTEM_MSG}--> Stream interrupted by user.{RESET_COLOR}")
     except Exception as e:
-        if print_stream: print(f"\n{SYSTEM_MSG}--> Stream interrupted: {e}{RESET_COLOR}")
+        if print_stream: print(f"\n{SYSTEM_MSG}--> Stream interrupted by network/API error: {e}{RESET_COLOR}")
         log.warning("Stream processing error: %s", e)
     tokens = {'prompt': p, 'completion': c, 'reasoning': r, 'total': t}
     return full_response, tokens
