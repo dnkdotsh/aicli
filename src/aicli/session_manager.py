@@ -295,44 +295,53 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
         print("\nSession interrupted by user.")
     finally:
         print("\nSession ended.")
-        if not initial_state.force_quit and not initial_state.exit_without_memory:
-            if os.path.exists(log_filename) and initial_state.history:
-                if initial_state.memory_enabled:
-                    commands.consolidate_session_into_memory(
-                        initial_state.engine, initial_state.model, initial_state.history
-                    )
-                else:
-                    print(
-                        f"{utils.SYSTEM_MSG}--> Persistent memory not enabled, skipping update.{utils.RESET_COLOR}"
-                    )
+        should_process_on_exit = (
+            not initial_state.force_quit and not initial_state.exit_without_memory
+        )
 
-                if initial_state.custom_log_rename:
-                    new_filepath = log_filename.replace(
-                        os.path.basename(log_filename),
-                        f"{utils.sanitize_filename(initial_state.custom_log_rename)}.jsonl",
-                    )
-                    try:
-                        os.rename(log_filename, new_filepath)
-                        print(
-                            f"{utils.SYSTEM_MSG}--> Session log renamed to: {new_filepath}{utils.RESET_COLOR}"
-                        )
-                    except OSError as e:
-                        log.error("Failed to rename session log: %s", e)
-                elif not session_name:
-                    commands.rename_session_log(
-                        initial_state.engine, initial_state.history, log_filename
-                    )
+        # Process memory and log renaming
+        if (
+            should_process_on_exit
+            and os.path.exists(log_filename)
+            and initial_state.history
+        ):
+            if initial_state.memory_enabled:
+                commands.consolidate_session_into_memory(
+                    initial_state.engine, initial_state.model, initial_state.history
+                )
+            else:
+                print(
+                    f"{utils.SYSTEM_MSG}--> Persistent memory not enabled, skipping update.{utils.RESET_COLOR}"
+                )
 
-            if initial_state.debug_active:
-                debug_filename = f"debug_{os.path.splitext(log_filename_base)[0]}.jsonl"
-                debug_filepath = config.LOG_DIRECTORY / debug_filename
-                print(f"Saving debug log to: {debug_filepath}")
+            if initial_state.custom_log_rename:
+                new_filepath = log_filename.replace(
+                    os.path.basename(log_filename),
+                    f"{utils.sanitize_filename(initial_state.custom_log_rename)}.jsonl",
+                )
                 try:
-                    with open(debug_filepath, "w", encoding="utf-8") as f:
-                        for entry in initial_state.session_raw_logs:
-                            f.write(json.dumps(entry) + "\n")
+                    os.rename(log_filename, new_filepath)
+                    print(
+                        f"{utils.SYSTEM_MSG}--> Session log renamed to: {new_filepath}{utils.RESET_COLOR}"
+                    )
                 except OSError as e:
-                    log.error("Could not save debug log file: %s", e)
+                    log.error("Failed to rename session log: %s", e)
+            elif not session_name:
+                commands.rename_session_log(
+                    initial_state.engine, initial_state.history, log_filename
+                )
+
+        # Save debug log if active
+        if should_process_on_exit and initial_state.debug_active:
+            debug_filename = f"debug_{os.path.splitext(log_filename_base)[0]}.jsonl"
+            debug_filepath = config.LOG_DIRECTORY / debug_filename
+            print(f"Saving debug log to: {debug_filepath}")
+            try:
+                with open(debug_filepath, "w", encoding="utf-8") as f:
+                    for entry in initial_state.session_raw_logs:
+                        f.write(json.dumps(entry) + "\n")
+            except OSError as e:
+                log.error("Could not save debug log file: %s", e)
 
 
 # --- Multi-Chat Session State and Logic ---
@@ -622,9 +631,13 @@ def perform_multichat_session(initial_state: MultiChatSessionState, session_name
         print("\nSession interrupted.")
     finally:
         print("\nSession ended.")
+        should_process_on_exit = (
+            not initial_state.force_quit and not initial_state.exit_without_memory
+        )
+
+        # Process log renaming
         if (
-            not initial_state.force_quit
-            and not initial_state.exit_without_memory
+            should_process_on_exit
             and os.path.exists(log_filename)
             and initial_state.shared_history
             and initial_state.custom_log_rename
@@ -641,11 +654,8 @@ def perform_multichat_session(initial_state: MultiChatSessionState, session_name
             except OSError as e:
                 log.error("Failed to rename session log: %s", e)
 
-        if (
-            not initial_state.force_quit
-            and not initial_state.exit_without_memory
-            and initial_state.debug_active
-        ):
+        # Save debug log if active
+        if should_process_on_exit and initial_state.debug_active:
             debug_filename = f"debug_{os.path.splitext(log_filename_base)[0]}.jsonl"
             debug_filepath = config.LOG_DIRECTORY / debug_filename
             print(f"Saving debug log to: {debug_filepath}")
