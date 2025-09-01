@@ -38,6 +38,8 @@ def mock_session_state(mock_openai_engine):
         engine=mock_openai_engine,
         model="gpt-4o-mini",
         system_prompt="You are a helpful assistant.",
+        initial_system_prompt="You are a helpful assistant.",
+        current_persona=None,
         max_tokens=1024,
         memory_enabled=True,
         debug_active=False,
@@ -52,16 +54,20 @@ def fake_fs():
     sessions, logs).
     Ensures core application directories exist in the fake filesystem.
     """
-    with Patcher() as patcher:
-        # Only ensure the base config and data directories exist.
-        # Subdirectories like logs/, images/, sessions/ will be created
-        # by the application's ensure_dir_exists calls (e.g. in aicli.main)
-        # or by specific tests that require them, preventing FileExistsError.
+    patcher = Patcher()
+    patcher.setUp()
+    try:
+        # Create all necessary application directories within the fake filesystem.
         config.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         config.DATA_DIR.mkdir(parents=True, exist_ok=True)
         config.LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
         config.IMAGE_DIRECTORY.mkdir(parents=True, exist_ok=True)
+        config.SESSIONS_DIRECTORY.mkdir(parents=True, exist_ok=True)
+        config.PERSONAS_DIRECTORY.mkdir(parents=True, exist_ok=True)
         yield patcher.fs
+    finally:
+        patcher.tearDown()
+
 
 @pytest.fixture
 def mock_requests_post(mocker):
@@ -136,9 +142,10 @@ def mock_prompt_toolkit(mocker):
             raise EOFError
         return input_queue.pop(0)
 
-    mock_prompt_func = mocker.patch('aicli.handlers.prompt', side_effect=_mocked_prompt_side_effect)
+    # Patch prompt in all modules where it might be called during tests
+    mocker.patch('aicli.handlers.prompt', side_effect=_mocked_prompt_side_effect)
+    mocker.patch('aicli.session_manager.prompt', side_effect=_mocked_prompt_side_effect)
 
     return {
-        'prompt': mock_prompt_func,
         'input_queue': input_queue # Tests will populate this list
     }
