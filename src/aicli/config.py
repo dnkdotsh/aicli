@@ -42,3 +42,8 @@ ROTATING_LOG_FILE = LOG_DIRECTORY / "aicli.log"
 # A "turn" consists of one user message and one assistant response.
 HISTORY_SUMMARY_THRESHOLD_TURNS = 12
 HISTORY_SUMMARY_TRIM_TURNS = 6
+
+# The size in bytes at which to warn the user about large context on first prompt.
+# 100 KB is a sensible threshold, representing a significant amount of text
+# (approx. 20-25k tokens) that warrants a cost/usage warning.
+LARGE_ATTACHMENT_THRESHOLD_BYTES = 100 * 1024 # 100 KB

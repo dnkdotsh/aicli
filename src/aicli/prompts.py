@@ -8,7 +8,8 @@
 # (at your option) any later version.
 
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# but WITHOUT ANY WARRANTY;
+# without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -32,9 +33,21 @@ MEMORY_INTEGRATION_PROMPT = (
     "You are a memory consolidation agent. Your task is to distill the crucial information from the 'NEW CHAT SESSION' "
     "and integrate it into the 'EXISTING PERSISTENT MEMORY'. Synthesize related topics, update existing facts with new "
     "information, and discard conversational fluff or trivial data. The final output must be a dense, factual summary, "
-    "optimized for conciseness and relevance for a future AI to use as context. Eliminate all verbosity.\n\n"
+    "optimized for conciseness and relevance for a future AI to use as context. Eliminate all verbosity and unnecessary "
+    "formatting and markdown.\n\n"
     "--- EXISTING PERSISTENT MEMORY ---\n{existing_ltm}\n\n"
     "--- NEW CHAT SESSION TO INTEGRATE ---\n{session_content}\n\n"
+    "--- UPDATED PERSISTENT MEMORY ---"
+)
+
+DIRECT_MEMORY_INJECTION_PROMPT = (
+    "You are a memory integration agent. Your task is to intelligently integrate the 'NEW FACT' into the "
+    "'EXISTING PERSISTENT MEMORY'. If the new fact updates or contradicts existing information, modify the memory "
+    "accordingly. If it's a new topic, add it concisely. The goal is to maintain a dense, coherent, and accurate "
+    "knowledge base. The final output must be the complete, updated memory, presented as a dense, factual summary. "
+    "Eliminate all verbosity and unnecessary formatting and markdown.\n\n"
+    "--- EXISTING PERSISTENT MEMORY ---\n{existing_ltm}\n\n"
+    "--- NEW FACT TO INTEGRATE ---\n{new_fact}\n\n"
     "--- UPDATED PERSISTENT MEMORY ---"
 )
 

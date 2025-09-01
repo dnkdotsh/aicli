@@ -3,12 +3,11 @@
 A flexible and robust command-line interface for interacting with multiple AI models, including OpenAI (GPT series) and Google (Gemini series).
 
 - **Multi-Engine Chat**: Engage with OpenAI or Gemini, or have them respond to the same prompt simultaneously for comparative analysis.
-- **Rich Context**: Attach local files, directories, or even zip archives to provide deep context for your conversations.
-- **Persistent Memory**: Leverage a long-term memory system that allows the AI to learn and retain information across different chat sessions.
-- **Session Management**: Save your interactive sessions to a file and resume them later, preserving the full conversation history and context.
-- **Live Context Refresh**: Update the content of attached files mid-session with the `/refresh` command, perfect for iterative coding and analysis.
+- **Dynamic Context Control**: Attach, detach, list, and refresh local files, directories, or even zip archives mid-conversation to provide deep, evolving context.
+- **Powerful Memory System**: Leverage a long-term memory file that the AI learns from across sessions. View, inject facts into, or consolidate conversations into memory on the fly.
+- **Full Session Management**: Save your interactive sessions to a file and resume them later, preserving the full conversation history, model state, and context.
 - **Image Generation**: Generate images using DALL-E 3 directly from the command line.
-- **Smart & Configurable**: Automatically manages conversation history to stay within token limits and allows for deep customization via a simple settings file.
+- **Smart & Configurable**: Warns about potentially expensive large contexts, automatically manages conversation history to stay within token limits, and allows for deep customization via a simple settings file.
 
 ---
 
@@ -56,7 +55,7 @@ Edit the new `.env` file and add your secret API keys. The application will load
 User-configurable settings (like default models and token limits) are stored in `settings.json`.
 
 -   **Location:** `~/.config/aicli/settings.json`
--   This file is created automatically on the first run or when using the `/set` command. You can edit it directly or manage settings from within an interactive session.
+-   This file is created automatically on the first run. You can edit it directly or manage settings from within an interactive session using `/set`.
 
 ---
 
@@ -94,7 +93,7 @@ aicli [-e {openai,gemini}] [-m MODEL] [--system-prompt PROMPT_OR_PATH]
 ### `review` Command
 Launch an interactive TUI to browse, replay, rename, or delete past chat logs and saved sessions.
 
-```
+```bash
 # Launch the interactive review tool
 aicli review
 
@@ -131,17 +130,20 @@ aicli --both "Compare and contrast Python's asyncio with traditional threading."
 aicli -i -p "A photorealistic image of a red panda programming on a laptop"
 ```
 
-**Save a session, then resume it later:**
+**Have a dynamic interactive session:**
 ```bash
-# Start an interactive session and attach a project
-aicli -f ./my-project/
+# Start an interactive session
+aicli
 
-# ... have a conversation ...
-# Then, inside the session, save it and exit
-You: /save my_project_review
-
-# Later, resume the session from the command line
-aicli --load my_project_review.json
+# Inside the session, attach a file and ask a question
+You: /attach ./src/main.py
+You: Review this code for me and suggest improvements.
+...
+# After getting feedback, remember a key detail for later
+You: /remember The project codename is 'Bluebird'
+...
+# Exit the session, giving the log a specific name
+You: /exit main_py_review
 ```
 
 ---
@@ -150,25 +152,33 @@ aicli --load my_project_review.json
 
 During an interactive chat session, type these commands instead of a prompt:
 
--   `/exit`: End the current session.
+#### **General Commands**
+-   `/exit [name]`: End the current session. Optionally provide a name for the log file.
+-   `/quit`: Exit immediately without saving memory or renaming the log.
 -   `/help`: Display this help message.
 -   `/clear`: Clear the current conversation history.
 -   `/history`: Print the raw JSON of the current conversation history.
 -   `/state`: Print the current session's configuration (model, engine, attached files, etc.).
 
-**Session & Context Management:**
+#### **Session & Context Management**
 -   `/save [name] [--stay]`: Save the session to a file. Auto-generates a name if not provided. Use `--stay` to continue the session after saving.
 -   `/load <filename>`: Load a session, replacing the current one.
 -   `/refresh [name]`: Re-read attached files. If `[name]` is provided, only refreshes files whose names contain the text.
--   `/memory`: Toggle whether the session will be saved to persistent memory on exit.
+-   `/attach <path>`: Attach a file to the session context.
+-   `/detach <name>`: Detach a file from the context by its filename.
+-   `/files`: List all currently attached text files, sorted by size.
 
-**AI & Model Control:**
+#### **Memory Management**
+-   `/memory`: View the contents of the persistent memory file.
+-   `/remember [text]`: Injects a specific `[text]` into persistent memory. If run without text, it consolidates the current conversation into memory.
+
+#### **AI & Model Control**
 -   `/engine [name]`: Switch between `openai` and `gemini`. The history is automatically translated.
 -   `/model [name]`: Change the model for the current engine.
 -   `/stream`: Toggle response streaming on or off for the current session.
 -   `/max-tokens <num>`: Set the max output tokens for the current session.
 -   `/debug`: Toggle raw API logging for the current session.
--   `/set <key> <value>`: Change a default setting (e.g., `/set default_max_tokens 8192`).
+-   `/set [key] [value]`: Change a default setting (e.g., `/set default_max_tokens 8192`). Run without arguments to list all settings.
 
 ---
 

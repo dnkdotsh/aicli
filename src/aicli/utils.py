@@ -319,17 +319,23 @@ def display_help(context: str):
     if context == 'chat':
         help_text = """
 Interactive Chat Commands:
-  /exit             End the current session.
+  /exit [name]      End the session. Optionally provide a name for the log file.
+  /quit             Exit immediately without updating memory or renaming the log.
   /help             Display this help message.
   /stream           Toggle response streaming on/off.
   /debug            Toggle session-specific raw API logging.
-  /memory           Toggle use of persistent memory for session conclusion.
+  /memory           View the content of the persistent memory file.
+  /remember [text]  If text is provided, inject it into persistent memory.
+                    If no text, consolidates current chat into memory.
   /clear            Clear the current conversation history.
   /history          Print the JSON of the current conversation history.
   /state            Print the current session state (engine, model, etc.).
   /refresh [name]   Re-read attached files to update the context.
                     If no name is given, all files are refreshed.
                     Otherwise, refreshes all files containing 'name'.
+  /files            List all currently attached text files, sorted by size.
+  /attach <path>    Attach a file or directory to the session context.
+  /detach <name>    Detach a file from the context by its filename.
   /save [name] [--stay] [--remember]
                     Save the session. Auto-generates a name if not provided.
                     --stay:      Do not exit after saving.
@@ -338,7 +344,8 @@ Interactive Chat Commands:
   /load <filename>  Load a session, replacing the current one.
   /engine [name]    Switch AI engine (openai/gemini). Translates history.
   /model [name]     Select a new model for the current engine.
-  /set key value    Change a setting in settings.py (e.g., /set stream false).
+  /set [key] [val]  Change a setting (e.g., /set stream false).
+                    Run without arguments to list all settings.
   /max-tokens [num] Set max tokens for the session.
 """
     elif context == 'multichat':

@@ -58,13 +58,11 @@ def test_handle_chat_single_shot(mocker, capsys):
     assert "Test response." in captured.out
     assert "[P:1/C:2/R:0/T:3]" in captured.out
 
-def test_handle_chat_interactive_mode_setup(mocker, mock_openai_engine, mock_prompt_toolkit):
+def test_handle_chat_interactive_mode_setup(mocker, mock_openai_engine):
     """
     Tests that handle_chat correctly sets up and delegates to perform_interactive_chat
     when no initial_prompt is given (interactive mode).
     """
-    mock_prompt_toolkit['input_queue'].append('/exit')
-
     mock_perform_interactive_chat = mocker.patch('aicli.handlers.perform_interactive_chat')
 
     test_attachments = {Path('/a/file.txt'): 'content'}
@@ -137,13 +135,14 @@ def test_handle_chat_single_shot_with_attachments_and_system_prompt(mocker):
     )
     assert call_args[3] == expected_full_system_prompt
 
-def test_handle_load_session_success(mocker, mock_prompt_toolkit):
+def test_handle_load_session_success(mocker):
     """Tests successfully loading a session and resuming interactive chat."""
     mock_load_session = mocker.patch('aicli.session_manager.load_session_from_file')
     mock_perform_chat = mocker.patch('aicli.handlers.perform_interactive_chat')
 
     fake_session_state = MagicMock(spec=SessionState)
     fake_session_state.history = []
+    fake_session_state.command_history = []
     fake_session_state.engine = MagicMock(name='mock_engine_obj')
     fake_session_state.engine.name = 'openai'
     fake_session_state.model = 'gpt-4o-mini'
@@ -152,8 +151,6 @@ def test_handle_load_session_success(mocker, mock_prompt_toolkit):
     fake_session_state.attached_images = []
     fake_session_state.memory_enabled = True
     mock_load_session.return_value = fake_session_state
-
-    mock_prompt_toolkit['input_queue'].append('/exit')
 
     test_filepath = Path("/fake/path/my_session.json")
     handlers.handle_load_session(str(test_filepath))
@@ -180,32 +177,6 @@ def test_handle_load_session_missing_api_key_exits(mocker):
         handlers.handle_load_session("my_session.json")
 
     assert excinfo.value.code == 1
-
-
-def test_handle_load_session_mock_fix(mocker, mock_prompt_toolkit):
-    """This test specifically fixes the AttributeError from the pytest output."""
-    mock_load_session = mocker.patch('aicli.session_manager.load_session_from_file')
-    mock_perform_chat = mocker.patch('aicli.handlers.perform_interactive_chat')
-
-    fake_session_state = MagicMock(spec=SessionState)
-    # The FIX: Add the history attribute that the code expects
-    fake_session_state.history = []
-    # Also add other attributes accessed for the initial printout
-    fake_session_state.engine = MagicMock(name='mock_engine_obj')
-    fake_session_state.engine.name = 'openai'
-    fake_session_state.model = 'gpt-4o-mini'
-    fake_session_state.attachments = {}
-    fake_session_state.attached_images = []
-    fake_session_state.memory_enabled = True
-    fake_session_state.system_prompt = "A prompt"
-
-    mock_load_session.return_value = fake_session_state
-    mock_prompt_toolkit['input_queue'].append('/exit')
-
-    # This should now run without an AttributeError
-    handlers.handle_load_session("my_session.json")
-    mock_perform_chat.assert_called_once()
-
 
 def test_handle_image_generation(mocker, fake_fs):
     """
@@ -280,7 +251,8 @@ class TestMultiChatHandlers:
 
         mocker.patch('aicli.engine.get_engine', side_effect=lambda name, key: self.mock_openai_engine if name == 'openai' else self.mock_gemini_engine)
 
-        mocker.patch.dict('aicli.settings.settings', {
+        # Mock the settings dictionary directly where it is imported and used in the handlers module.
+        mocker.patch.dict(handlers.settings, {
             'default_engine': 'openai',
             'default_openai_chat_model': 'gpt-4o-mini',
             'default_gemini_model': 'gemini-1.5-flash-latest'
@@ -324,7 +296,6 @@ class TestMultiChatHandlers:
         assert args[0].name == 'openai'
         assert "Hello multi-chat" in args[2][0]['content'][0]['text']
         assert "Global system prompt" in args[3]
-        # PyEvolve Change: Update assertion to match full system prompt
         assert "You are OpenAI only." in args[3]
 
         self.mock_secondary_worker.assert_called_once()
@@ -352,7 +323,6 @@ class TestMultiChatHandlers:
         args, kwargs = self.mock_perform_chat.call_args
         assert args[0].name == 'openai'
         assert "Director to All: Test broadcast prompt" in args[2][-1]['content'][0]['text']
-        # PyEvolve Change: Update assertion to match full system prompt
         assert "You are OpenAI only." in args[3]
 
         self.mock_secondary_worker.assert_called_once()
@@ -411,7 +381,7 @@ class TestSelectModel:
         self.mock_engine = MagicMock(spec=OpenAIEngine)
         self.mock_engine.name = 'openai'
         self.mock_engine.fetch_available_models.return_value = ["model-a", "model-b", "model-c"]
-        mocker.patch('aicli.settings.settings', {
+        mocker.patch.dict(handlers.settings, {
             'default_openai_chat_model': 'gpt-4o-mini',
             'default_openai_image_model': 'dall-e-3',
             'default_gemini_model': 'gemini-2.5-flash'
