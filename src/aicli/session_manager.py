@@ -627,17 +627,21 @@ def perform_multichat_session(initial_state: MultiChatSessionState, session_name
                 sys.stdout.flush()
                 continue
 
-            # Clear the raw user input line for a cleaner interface
-            sys.stdout.write("\x1b[1A\x1b[2K")
-            sys.stdout.flush()
+            if user_input.lstrip().startswith("/"):
+                # Clear the raw user input line for a cleaner interface
+                sys.stdout.write("\x1b[1A\x1b[2K")
+                sys.stdout.flush()
 
-            is_ai_command = user_input.lstrip().lower().startswith("/ai")
-            if user_input.lstrip().startswith("/") and not is_ai_command:
-                if _handle_multichat_slash_command(
-                    user_input, initial_state, cli_history
-                ):
-                    break
+                is_ai_command = user_input.lstrip().lower().startswith("/ai")
+                if is_ai_command:
+                    process_turn(user_input)
+                else:  # It's a meta-command like /help or /exit
+                    if _handle_multichat_slash_command(
+                        user_input, initial_state, cli_history
+                    ):
+                        break
             else:
+                # This is a regular prompt, so we don't clear the line
                 process_turn(user_input)
     except (KeyboardInterrupt, EOFError):
         print("\nSession interrupted.")
