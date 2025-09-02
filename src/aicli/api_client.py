@@ -77,6 +77,7 @@ def make_api_request(
     Raises ApiRequestError on failure.
     """
     response_data = None
+    error_details_for_log = None
     log_entry = {
         "timestamp": datetime.datetime.now().isoformat(),
         "request": {"url": url, "headers": headers, "payload": payload},
@@ -117,18 +118,24 @@ def make_api_request(
         except requests.exceptions.JSONDecodeError:
             error_details = e.response.text
         log.error("HTTP Request Error: %s\nDETAILS: %s", e, error_details)
+        error_details_for_log = error_details
         raise ApiRequestError(error_details) from e
-    except requests.exceptions.RequestException as e:
-        log.error("Request Error: %s", e)
-        raise ApiRequestError(str(e)) from e
     except requests.exceptions.JSONDecodeError as e:
         log.error("Failed to decode API response.")
+        error_details_for_log = "Failed to decode API response."
         raise ApiRequestError("Failed to decode API response.") from e
+    except requests.exceptions.RequestException as e:
+        log.error("Request Error: %s", e)
+        error_details_for_log = str(e)
+        raise ApiRequestError(str(e)) from e
     finally:
         if not stream:
-            log_entry["response"] = response_data or {
-                "error": "Request failed, see logs for details."
-            }
+            if error_details_for_log:
+                log_entry["response"] = {"error": error_details_for_log}
+            else:
+                log_entry["response"] = response_data or {
+                    "error": "Request failed, see logs for details."
+                }
         safe_log_entry = _redact_sensitive_info(log_entry)
         if session_raw_logs is not None:
             session_raw_logs.append(safe_log_entry)
