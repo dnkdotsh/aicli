@@ -31,7 +31,6 @@ from dotenv import load_dotenv
 from . import api_client, config, handlers, review, utils
 from . import personas as persona_manager
 from .engine import get_engine
-from .logger import log
 from .settings import settings
 
 
@@ -226,14 +225,25 @@ def run_chat_command(args):
             image_prompt = prompt or initial_system_prompt
             handlers.handle_image_generation(api_key, engine_instance, image_prompt)
     except api_client.MissingApiKeyError as e:
-        log.error(e)
+        print(
+            f"{utils.SYSTEM_MSG}Configuration Error:{utils.RESET_COLOR}",
+            file=sys.stderr,
+        )
+        print(f"  {e}", file=sys.stderr)
+        print(
+            "\nPlease create a .env file with your API keys at the following location:",
+            file=sys.stderr,
+        )
+        print(f"  {config.DOTENV_FILE}", file=sys.stderr)
+        print("\nExample .env content:", file=sys.stderr)
+        print("  OPENAI_API_KEY=sk-...\n  GEMINI_API_KEY=AIza...", file=sys.stderr)
         sys.exit(1)
 
 
 def main():
     """Parses arguments and orchestrates the application flow."""
-    load_dotenv()
     utils.ensure_dir_exists(config.CONFIG_DIR)
+    load_dotenv(dotenv_path=config.DOTENV_FILE)
     utils.ensure_dir_exists(config.LOG_DIRECTORY)
     utils.ensure_dir_exists(config.IMAGE_DIRECTORY)
     utils.ensure_dir_exists(config.SESSIONS_DIRECTORY)

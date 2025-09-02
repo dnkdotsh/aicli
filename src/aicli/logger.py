@@ -42,6 +42,23 @@ def setup_logger():
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
 
+    # --- Ensure log directory exists before creating the file handler ---
+    # This must be done here to prevent a crash on first run.
+    try:
+        log_dir = config.ROTATING_LOG_FILE.parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        # If this fails, we can't log to a file, but we can still use the console.
+        # We print directly to stderr because the logger isn't fully configured yet.
+        print(
+            f"CRITICAL: Could not create log directory {log_dir}: {e}", file=sys.stderr
+        )
+        # Fallback to just a console logger if directory creation fails
+        if not logger.handlers:
+            logger.addHandler(console_handler)
+        return logger
+    # -------------------------------------------------------------------
+
     # Rotating file handler for persistent logs
     # Rotates when the log reaches 1MB, keeping up to 5 backup logs.
     file_handler = RotatingFileHandler(

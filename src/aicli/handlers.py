@@ -24,7 +24,6 @@ import os
 import sys
 
 import requests
-from prompt_toolkit import prompt
 
 from . import api_client, commands, config, utils
 from . import personas as persona_manager
@@ -38,48 +37,6 @@ from .session_manager import (
     perform_multichat_session,
 )
 from .settings import settings
-
-
-def select_model(engine: AIEngine, task: str) -> str:
-    """Allows the user to select a model or use the default."""
-    default_model = ""
-    if task == "chat":
-        default_model = (
-            settings["default_openai_chat_model"]
-            if engine.name == "openai"
-            else settings["default_gemini_model"]
-        )
-    elif task == "image":
-        default_model = settings["default_openai_image_model"]
-
-    use_default = (
-        prompt(f"Use default model ({default_model})? (Y/n): ").lower().strip()
-    )
-    if use_default in ("", "y", "yes"):
-        return default_model
-
-    print("Fetching available models...")
-    models = engine.fetch_available_models(task)
-    if not models:
-        print(f"Using default: {default_model}")
-        return default_model
-
-    print("\nPlease select a model:")
-    for i, model_name in enumerate(models):
-        print(f"  {i + 1}. {model_name}")
-
-    try:
-        choice = prompt("Enter number (or press Enter for default): ")
-        if not choice:
-            return default_model
-        index = int(choice) - 1
-        if 0 <= index < len(models):
-            return models[index]
-    except (ValueError, IndexError):
-        pass
-
-    print(f"Invalid selection. Using default: {default_model}")
-    return default_model
 
 
 def handle_chat(
@@ -230,7 +187,7 @@ def handle_multichat_session(
 
 def handle_image_generation(api_key: str, engine: AIEngine, prompt: str):
     """Handles OpenAI image generation."""
-    model = select_model(engine, "image")
+    model = utils.select_model(engine, "image")
     if not prompt:
         prompt = (
             sys.stdin.read().strip()

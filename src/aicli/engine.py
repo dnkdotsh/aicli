@@ -21,7 +21,6 @@ from typing import Any
 
 import requests
 
-from . import utils
 from .logger import log
 from .settings import settings
 
@@ -105,6 +104,9 @@ class OpenAIEngine(AIEngine):
         return payload
 
     def parse_chat_response(self, response_data: dict[str, Any]) -> str:
+        # Local import to break circular dependency: engine -> utils -> engine
+        from . import utils
+
         if "choices" in response_data and response_data["choices"]:
             message = response_data["choices"][0].get("message")
             if message:

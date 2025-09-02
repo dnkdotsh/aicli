@@ -89,6 +89,15 @@ class TestSessionManagerCommands:
         assert should_exit is False
         assert session_state.command_history == ["/help", "first prompt"]
 
+    def test_command_unknown(self, session_state, capsys):
+        """Tests that an unknown command prints an error and does not exit."""
+        should_exit = _handle_slash_command(
+            "/unknown_command", session_state, MagicMock()
+        )
+        assert should_exit is False
+        captured = capsys.readouterr()
+        assert "Unknown command: /unknown_command" in captured.out
+
 
 class TestSessionLifecycle:
     """Tests for the overall session lifecycle management."""

@@ -28,7 +28,7 @@ from prompt_toolkit import prompt
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.history import InMemoryHistory
 
-from . import api_client, commands, config, utils
+from . import api_client, config, utils
 from . import personas as persona_manager
 from . import settings as app_settings
 from .engine import AIEngine
@@ -130,6 +130,9 @@ def _handle_slash_command(
     user_input: str, state: SessionState, cli_history: InMemoryHistory
 ) -> bool:
     """Handles in-app slash commands by dispatching to the commands module."""
+    # Local import to break circular dependency: session_manager -> commands -> ... -> session_manager
+    from . import commands
+
     parts = user_input.strip().split()
     command_str = parts[0].lower()
     args = parts[1:]
@@ -148,6 +151,9 @@ def _handle_slash_command(
 
 def perform_interactive_chat(initial_state: SessionState, session_name: str):
     """Manages the main loop for an interactive chat session."""
+    # Local import to break circular dependency for functions used in 'finally' block
+    from . import commands
+
     log_filename_base = (
         session_name
         or f"chat_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}_{initial_state.engine.name}"
@@ -169,13 +175,11 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
     if initial_state.system_prompt and not initial_state.current_persona:
         print(f"{utils.SYSTEM_MSG}System prompt is active.{utils.RESET_COLOR}")
     if initial_state.attachments:
-        from .commands import _format_bytes
-
         total_size = sum(
             p.stat().st_size for p in initial_state.attachments if p.exists()
         )
         print(
-            f"{utils.SYSTEM_MSG}Attached {len(initial_state.attachments)} text file(s). Total size: {_format_bytes(total_size)}{utils.RESET_COLOR}"
+            f"{utils.SYSTEM_MSG}Attached {len(initial_state.attachments)} text file(s). Total size: {commands._format_bytes(total_size)}{utils.RESET_COLOR}"
         )
     if initial_state.attached_images:
         print(
@@ -196,8 +200,6 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
     should_exit = False
     try:
         if first_turn and initial_state.attachments:
-            from .commands import _format_bytes
-
             total_size = sum(
                 p.stat().st_size for p in initial_state.attachments if p.exists()
             )
@@ -206,7 +208,7 @@ def perform_interactive_chat(initial_state: SessionState, session_name: str):
                 and not large_attachment_confirmed
             ):
                 warning_msg = (
-                    f"\n{utils.SYSTEM_MSG}WARNING: Total size of attached files is {_format_bytes(total_size)}.\n"
+                    f"\n{utils.SYSTEM_MSG}WARNING: Total size of attached files is {commands._format_bytes(total_size)}.\n"
                     f"This may result in high API token usage and costs.\n"
                     f"Type 'yes' to proceed with the session: {utils.RESET_COLOR}"
                 )
@@ -391,6 +393,9 @@ def _handle_multichat_slash_command(
     user_input: str, state: MultiChatSessionState, cli_history: InMemoryHistory
 ) -> bool:
     """Handles in-app slash commands for multi-chat mode."""
+    # Local import to break circular dependency
+    from . import commands
+
     parts = user_input.strip().split()
     command_str = parts[0].lower()
     args = parts[1:]

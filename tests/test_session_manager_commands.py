@@ -4,12 +4,15 @@ Tests for the state-modifying and file-interacting slash commands
 in aicli/commands.py.
 """
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from aicli import commands, config, utils
+from aicli import settings as app_settings
 from aicli.session_manager import MultiChatSessionState, SessionState
+from prompt_toolkit.history import InMemoryHistory
 
 
 @pytest.fixture
@@ -46,6 +49,14 @@ def session_state_with_history(mock_openai_engine):
     )
     state.history = history
     return state
+
+
+@pytest.fixture
+def mock_cli_history(mocker):
+    """Provides a mock InMemoryHistory object with pre-populated strings for testing saves."""
+    history = mocker.MagicMock(spec=InMemoryHistory)
+    history.get_strings.return_value = ["/help", "first prompt"]
+    return history
 
 
 class TestSessionManagerFileCommands:
@@ -189,6 +200,149 @@ class TestSessionManagerFileCommands:
         assert should_exit is True
         assert mock_session_state.custom_log_rename == "my custom log name"
 
+    def test_command_files(self, mock_session_state, fake_fs, capsys):
+        """Tests that /files correctly lists attached files."""
+        file1 = Path("/test/small.txt")
+        file2 = Path("/test/large.py")
+        fake_fs.create_file(file1, contents="a")
+        fake_fs.create_file(file2, contents="a" * 1024)
+        mock_session_state.attachments = {
+            file1.resolve(): "a",
+            file2.resolve(): "a" * 1024,
+        }
+
+        commands.handle_files([], mock_session_state, MagicMock())
+        captured = capsys.readouterr()
+
+        assert "--- Attached Text Files (Sorted by Size) ---" in captured.out
+        assert captured.out.find("large.py (1.00 KB)") < captured.out.find(
+            "small.txt (1.00 B)"
+        )
+
+    def test_command_refresh_success(self, mock_session_state, fake_fs):
+        """Tests that /refresh updates file content in the session state."""
+        test_file = Path("/test/app.py")
+        fake_fs.create_file(test_file, contents="initial content")
+        mock_session_state.attachments = {test_file.resolve(): "initial content"}
+
+        test_file.write_text("updated content")
+
+        commands.handle_refresh([], mock_session_state, MagicMock())
+
+        assert mock_session_state.attachments[test_file.resolve()] == "updated content"
+        assert (
+            "content of the following file(s) has been updated"
+            in utils.extract_text_from_message(mock_session_state.history[-1])
+        )
+
+    def test_command_refresh_file_deleted(self, mock_session_state, fake_fs):
+        """Tests that /refresh removes a file from context if it's been deleted."""
+        test_file = Path("/test/app.py").resolve()
+        mock_session_state.attachments = {test_file: "content"}
+
+        commands.handle_refresh([], mock_session_state, MagicMock())
+
+        assert test_file not in mock_session_state.attachments
+        assert len(mock_session_state.history) == 0
+
+    def test_command_save_and_load_session(
+        self, session_state_with_history, fake_fs, mock_cli_history, mocker
+    ):
+        """An integration test for saving and then loading a session."""
+        mocker.patch("aicli.api_client.check_api_keys", return_value="fake_key")
+
+        session_state_with_history.command_history = mock_cli_history.get_strings()
+        filename_to_save = "my_test_session"
+        commands._save_session_to_file(session_state_with_history, filename_to_save)
+
+        saved_file_path = config.SESSIONS_DIRECTORY / f"{filename_to_save}.json"
+        assert saved_file_path.exists()
+
+        loaded_state = commands.load_session_from_file(saved_file_path)
+
+        assert loaded_state is not None
+        assert loaded_state.model == session_state_with_history.model
+        assert len(loaded_state.history) == 4
+        assert (
+            utils.extract_text_from_message(loaded_state.history[0]) == "First prompt"
+        )
+        assert loaded_state.command_history == ["/help", "first prompt"]
+
+
+class TestSessionStateCommands:
+    """Test suite for commands that modify the session's state directly."""
+
+    def test_command_clear_confirmed(self, session_state_with_history, mocker):
+        """Tests that /clear empties the history after user confirmation."""
+        # FIX: Patch where the 'prompt' function is USED.
+        mocker.patch("aicli.commands.prompt", return_value="proceed")
+
+        assert len(session_state_with_history.history) > 0
+        commands.handle_clear([], session_state_with_history, MagicMock())
+        assert len(session_state_with_history.history) == 0
+
+    def test_command_clear_cancelled(self, session_state_with_history, mocker):
+        """Tests that /clear does nothing if the user cancels."""
+        # FIX: Patch where the 'prompt' function is USED.
+        mocker.patch("aicli.commands.prompt", return_value="cancel")
+
+        assert len(session_state_with_history.history) > 0
+        commands.handle_clear([], session_state_with_history, MagicMock())
+        assert len(session_state_with_history.history) > 0
+
+    def test_command_engine_switch(self, mock_session_state, mocker):
+        """Tests switching the AI engine and model."""
+        mock_check_keys = mocker.patch(
+            "aicli.api_client.check_api_keys", return_value="gemini_key"
+        )
+        mock_get_engine = mocker.patch("aicli.commands.get_engine")
+        mock_translate = mocker.patch(
+            "aicli.utils.translate_history", return_value=[{"translated": True}]
+        )
+
+        assert mock_session_state.engine.name == "openai"
+
+        commands.handle_engine(["gemini"], mock_session_state, MagicMock())
+
+        mock_check_keys.assert_called_once_with("gemini")
+        mock_get_engine.assert_called_once()
+        mock_translate.assert_called_once()
+
+        assert mock_session_state.model == app_settings.settings["default_gemini_model"]
+        assert mock_session_state.history == [{"translated": True}]
+
+    def test_command_persona_switch_and_clear(self, mock_session_state, fake_fs):
+        """Tests switching to a new persona and then clearing it."""
+        persona_content = {
+            "name": "Code Reviewer",
+            "system_prompt": "You are a code reviewer.",
+            "engine": "openai",
+            "model": "gpt-4-turbo",
+        }
+        fake_fs.create_file(
+            config.PERSONAS_DIRECTORY / "reviewer.json",
+            contents=json.dumps(persona_content),
+        )
+
+        commands.handle_persona(["reviewer"], mock_session_state, MagicMock())
+
+        assert mock_session_state.current_persona is not None
+        assert mock_session_state.current_persona.name == "Code Reviewer"
+        assert mock_session_state.system_prompt == "You are a code reviewer."
+        assert mock_session_state.model == "gpt-4-turbo"
+        assert "Persona changed" in utils.extract_text_from_message(
+            mock_session_state.history[-1]
+        )
+
+        mock_session_state.initial_system_prompt = "initial prompt"
+        commands.handle_persona(["clear"], mock_session_state, MagicMock())
+
+        assert mock_session_state.current_persona is None
+        assert mock_session_state.system_prompt == "initial prompt"
+        assert "persona has been cleared" in utils.extract_text_from_message(
+            mock_session_state.history[-1]
+        )
+
 
 @pytest.fixture
 def mock_multichat_state(mock_openai_engine, mock_gemini_engine):
@@ -226,3 +380,37 @@ class TestMultiChatCommands:
         captured = capsys.readouterr()
         assert '"role": "user"' in captured.out
         assert '"content": "test"' in captured.out
+
+    def test_multichat_model_command(self, mock_multichat_state):
+        """Tests that /model correctly updates the targeted model in multichat state."""
+        commands.handle_multichat_model(
+            ["gpt", "new-gpt-model"], mock_multichat_state, MagicMock()
+        )
+        assert mock_multichat_state.openai_model == "new-gpt-model"
+        assert mock_multichat_state.gemini_model == "gemini-1.5-flash"
+
+        commands.handle_multichat_model(
+            ["gem", "new-gem-model"], mock_multichat_state, MagicMock()
+        )
+        assert mock_multichat_state.openai_model == "new-gpt-model"
+        assert mock_multichat_state.gemini_model == "new-gem-model"
+
+    def test_multichat_save_command_success(
+        self, mock_multichat_state, fake_fs, mock_cli_history
+    ):
+        """Tests that the /save command for multichat sessions works correctly."""
+        should_exit = commands.handle_multichat_save(
+            ["my-multi-session"], mock_multichat_state, mock_cli_history
+        )
+
+        assert should_exit is True
+        saved_path = config.SESSIONS_DIRECTORY / "my_multi_session.json"
+        assert saved_path.exists()
+
+        with open(saved_path) as f:
+            data = json.load(f)
+
+        assert data["session_type"] == "multichat"
+        assert data["openai_model"] == "gpt-4o-mini"
+        assert "openai_engine" not in data
+        assert mock_multichat_state.command_history == ["/help", "first prompt"]

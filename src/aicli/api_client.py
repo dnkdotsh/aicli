@@ -21,6 +21,7 @@ import datetime
 import json
 import os
 import re
+import sys
 
 import requests
 
@@ -146,6 +147,96 @@ def make_api_request(
             log.warning("Could not write to raw log file: %s", e)
 
 
+def _parse_token_counts(
+    engine_name: str, response_data: dict
+) -> tuple[int, int, int, int]:
+    """Parses token counts from a non-streaming API response."""
+    p, c, r, t = 0, 0, 0, 0
+    if not response_data:
+        return 0, 0, 0, 0
+    if engine_name == "openai":
+        if "usage" in response_data:
+            p = response_data["usage"].get("prompt_tokens", 0)
+            c = response_data["usage"].get("completion_tokens", 0)
+            t = response_data["usage"].get("total_tokens", 0)
+    elif engine_name == "gemini":
+        usage = response_data.get("usageMetadata", {})
+        p = usage.get("promptTokenCount", 0)
+        c = usage.get("candidatesTokenCount", 0)
+        r = usage.get("cachedContentTokenCount", 0)
+        t = usage.get("totalTokenCount", 0)
+    return p, c, r, t
+
+
+def _process_stream(
+    engine: str, response: requests.Response, print_stream: bool = True
+) -> tuple[str, dict]:
+    """Processes a streaming API response."""
+    full_response, p, c, r, t = "", 0, 0, 0, 0
+    try:
+        for chunk in response.iter_lines():
+            if not chunk:
+                continue
+            decoded_chunk = chunk.decode("utf-8")
+            if engine == "openai":
+                if decoded_chunk.startswith("data:"):
+                    if "[DONE]" in decoded_chunk:
+                        break
+                    try:
+                        data = json.loads(decoded_chunk.split("data: ", 1)[1])
+                        if (
+                            "choices" in data
+                            and data["choices"]
+                            and data["choices"][0].get("delta", {}).get("content")
+                        ):
+                            text_chunk = data["choices"][0]["delta"]["content"]
+                            if print_stream:
+                                sys.stdout.write(text_chunk)
+                                sys.stdout.flush()
+                            full_response += text_chunk
+                        if "usage" in data and data["usage"]:
+                            p = data["usage"].get("prompt_tokens", 0)
+                            c = data["usage"].get("completion_tokens", 0)
+                            t = data["usage"].get("total_tokens", 0)
+                    except json.JSONDecodeError:
+                        continue
+            elif engine == "gemini":
+                try:
+                    data = json.loads(decoded_chunk.split("data: ", 1)[1])
+                    if "candidates" in data:
+                        text_chunk = (
+                            data["candidates"][0]
+                            .get("content", {})
+                            .get("parts", [{}])[0]
+                            .get("text", "")
+                        )
+                        if print_stream:
+                            sys.stdout.write(text_chunk)
+                            sys.stdout.flush()
+                        full_response += text_chunk
+                    if "usageMetadata" in data:
+                        p = data["usageMetadata"].get("promptTokenCount", 0)
+                        c = data["usageMetadata"].get("candidatesTokenCount", 0)
+                        r = data["usageMetadata"].get("cachedContentTokenCount", 0)
+                        t = data["usageMetadata"].get("totalTokenCount", 0)
+                except (json.JSONDecodeError, IndexError):
+                    continue
+    except KeyboardInterrupt:
+        if print_stream:
+            # A newline is needed to move the cursor to the next line after the partial response.
+            print(
+                f"\n{utils.SYSTEM_MSG}--> Stream interrupted by user.{utils.RESET_COLOR}"
+            )
+    except Exception as e:
+        if print_stream:
+            print(
+                f"\n{utils.SYSTEM_MSG}--> Stream interrupted by network/API error: {e}{utils.RESET_COLOR}"
+            )
+        log.warning("Stream processing error: %s", e)
+    tokens = {"prompt": p, "completion": c, "reasoning": r, "total": t}
+    return full_response, tokens
+
+
 def perform_chat_request(
     engine: AIEngine,
     model: str,
@@ -177,12 +268,10 @@ def perform_chat_request(
         return "", {}
 
     if stream:
-        return utils.process_stream(
-            engine.name, response_obj, print_stream=print_stream
-        )
+        return _process_stream(engine.name, response_obj, print_stream=print_stream)
 
     response_data = response_obj
     assistant_response = engine.parse_chat_response(response_data)
-    p, c, r, t = utils.parse_token_counts(engine.name, response_data)
+    p, c, r, t = _parse_token_counts(engine.name, response_data)
     tokens = {"prompt": p, "completion": c, "reasoning": r, "total": t}
     return assistant_response, tokens

@@ -17,7 +17,6 @@
 
 
 import base64
-import json
 import mimetypes
 import os
 import re
@@ -27,8 +26,12 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from prompt_toolkit import prompt
+
 from . import config
+from .engine import AIEngine
 from .logger import log
+from .settings import settings
 
 # ANSI color codes for prompts
 USER_PROMPT = "\033[94m"  # Bright Blue
@@ -87,6 +90,48 @@ SUPPORTED_EXTENSIONLESS_FILENAMES = {
     ".gitignore",
     "license",
 }
+
+
+def select_model(engine: AIEngine, task: str) -> str:
+    """Allows the user to select a model or use the default."""
+    default_model = ""
+    if task == "chat":
+        default_model = (
+            settings["default_openai_chat_model"]
+            if engine.name == "openai"
+            else settings["default_gemini_model"]
+        )
+    elif task == "image":
+        default_model = settings["default_openai_image_model"]
+
+    use_default = (
+        prompt(f"Use default model ({default_model})? (Y/n): ").lower().strip()
+    )
+    if use_default in ("", "y", "yes"):
+        return default_model
+
+    print("Fetching available models...")
+    models = engine.fetch_available_models(task)
+    if not models:
+        print(f"Using default: {default_model}")
+        return default_model
+
+    print("\nPlease select a model:")
+    for i, model_name in enumerate(models):
+        print(f"  {i + 1}. {model_name}")
+
+    try:
+        choice = prompt("Enter number (or press Enter for default): ")
+        if not choice:
+            return default_model
+        index = int(choice) - 1
+        if 0 <= index < len(models):
+            return models[index]
+    except (ValueError, IndexError):
+        pass
+
+    print(f"Invalid selection. Using default: {default_model}")
+    return default_model
 
 
 def read_system_prompt(prompt_or_path: str) -> str:
@@ -338,94 +383,6 @@ def extract_text_from_message(message: dict[str, Any]) -> str:
             if isinstance(part, dict) and "text" in part:
                 return part.get("text", "")
     return message.get("text", "")
-
-
-def parse_token_counts(
-    engine_name: str, response_data: dict
-) -> tuple[int, int, int, int]:
-    """Parses token counts from a non-streaming API response."""
-    p, c, r, t = 0, 0, 0, 0
-    if not response_data:
-        return 0, 0, 0, 0
-    if engine_name == "openai":
-        if "usage" in response_data:
-            p = response_data["usage"].get("prompt_tokens", 0)
-            c = response_data["usage"].get("completion_tokens", 0)
-            t = response_data["usage"].get("total_tokens", 0)
-    elif engine_name == "gemini":
-        usage = response_data.get("usageMetadata", {})
-        p = usage.get("promptTokenCount", 0)
-        c = usage.get("candidatesTokenCount", 0)
-        r = usage.get("cachedContentTokenCount", 0)
-        t = usage.get("totalTokenCount", 0)
-    return p, c, r, t
-
-
-def process_stream(
-    engine: str, response: Any, print_stream: bool = True
-) -> tuple[str, dict]:
-    """Processes a streaming API response."""
-    full_response, p, c, r, t = "", 0, 0, 0, 0
-    try:
-        for chunk in response.iter_lines():
-            if not chunk:
-                continue
-            decoded_chunk = chunk.decode("utf-8")
-            if engine == "openai":
-                if decoded_chunk.startswith("data:"):
-                    if "[DONE]" in decoded_chunk:
-                        break
-                    try:
-                        data = json.loads(decoded_chunk.split("data: ", 1)[1])
-                        if (
-                            "choices" in data
-                            and data["choices"]
-                            and data["choices"][0].get("delta", {}).get("content")
-                        ):
-                            text_chunk = data["choices"][0]["delta"]["content"]
-                            if print_stream:
-                                sys.stdout.write(text_chunk)
-                                sys.stdout.flush()
-                            full_response += text_chunk
-                        if "usage" in data and data["usage"]:
-                            p = data["usage"].get("prompt_tokens", 0)
-                            c = data["usage"].get("completion_tokens", 0)
-                            t = data["usage"].get("total_tokens", 0)
-                    except json.JSONDecodeError:
-                        continue
-            elif engine == "gemini":
-                try:
-                    data = json.loads(decoded_chunk.split("data: ", 1)[1])
-                    if "candidates" in data:
-                        text_chunk = (
-                            data["candidates"][0]
-                            .get("content", {})
-                            .get("parts", [{}])[0]
-                            .get("text", "")
-                        )
-                        if print_stream:
-                            sys.stdout.write(text_chunk)
-                            sys.stdout.flush()
-                        full_response += text_chunk
-                    if "usageMetadata" in data:
-                        p = data["usageMetadata"].get("promptTokenCount", 0)
-                        c = data["usageMetadata"].get("candidatesTokenCount", 0)
-                        r = data["usageMetadata"].get("cachedContentTokenCount", 0)
-                        t = data["usageMetadata"].get("totalTokenCount", 0)
-                except (json.JSONDecodeError, IndexError):
-                    continue
-    except KeyboardInterrupt:
-        if print_stream:
-            # A newline is needed to move the cursor to the next line after the partial response.
-            print(f"\n{SYSTEM_MSG}--> Stream interrupted by user.{RESET_COLOR}")
-    except Exception as e:
-        if print_stream:
-            print(
-                f"\n{SYSTEM_MSG}--> Stream interrupted by network/API error: {e}{RESET_COLOR}"
-            )
-        log.warning("Stream processing error: %s", e)
-    tokens = {"prompt": p, "completion": c, "reasoning": r, "total": t}
-    return full_response, tokens
 
 
 def format_token_string(token_dict: dict) -> str:

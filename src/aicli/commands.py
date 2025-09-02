@@ -396,15 +396,13 @@ def handle_clear(args: list, state: "SessionState", cli_history: InMemoryHistory
 
 
 def handle_model(args: list, state: "SessionState", cli_history: InMemoryHistory):
-    from . import handlers  # Local import to avoid circular dependency
-
     if args:
         state.model = args[0]
         print(
             f"{utils.SYSTEM_MSG}--> Model temporarily set to: {state.model}{utils.RESET_COLOR}"
         )
     else:
-        state.model = handlers.select_model(state.engine, "chat")
+        state.model = utils.select_model(state.engine, "chat")
         print(
             f"{utils.SYSTEM_MSG}--> Model changed to: {state.model}{utils.RESET_COLOR}"
         )

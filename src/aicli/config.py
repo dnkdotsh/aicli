@@ -48,6 +48,7 @@ PERSONAS_DIRECTORY = CONFIG_DIR / "personas"
 
 # --- Specific File Paths ---
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
+DOTENV_FILE = CONFIG_DIR / ".env"
 IMAGE_LOG_FILE = LOG_DIRECTORY / "image_log.jsonl"
 PERSISTENT_MEMORY_FILE = LOG_DIRECTORY / "persistent_memory.txt"
 RAW_LOG_FILE = LOG_DIRECTORY / "raw.log"
