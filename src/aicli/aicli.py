@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 Dank A. Saurus
+# Copyright (C) 2025 David
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY;
-# without even the implied warranty of
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -381,53 +380,30 @@ def main():
     else:
         if is_chat_command:
             args_list = args_list[1:]
-        args = chat_parent_parser.parse_args(args_list)
+
+        # Handle the `aicli` command with no arguments for interactive mode.
         if not args_list and sys.stdin.isatty():
-            # This is the no-argument `aicli` case. We now load the default persona.
-            default_persona = persona_manager.load_persona(
-                persona_manager.DEFAULT_PERSONA_NAME
+            args = argparse.Namespace(
+                chat=True,
+                image=False,
+                both=None,
+                load=None,
+                prompt=None,
+                file=None,
+                exclude=None,
+                memory=False,  # Let run_chat_command use the setting's default
+                session_name=None,
+                system_prompt=None,
+                persona=None,  # Let run_chat_command load the default persona
+                engine=settings["default_engine"],
+                model=None,
+                max_tokens=settings["default_max_tokens"],
+                stream=None,
+                debug=False,
             )
-            engine_name = (
-                default_persona.engine
-                if default_persona and default_persona.engine
-                else settings["default_engine"]
-            )
-            model_name = (
-                default_persona.model
-                if default_persona and default_persona.model
-                else settings["default_gemini_model"]
-            )
-            initial_sys_prompt = (
-                default_persona.system_prompt if default_persona else None
-            )
-
-            memory_content, attachments, _ = utils.process_files(
-                None, settings["memory_enabled"], None
-            )
-            api_system_prompt = initial_sys_prompt
-            if memory_content:
-                api_system_prompt = (
-                    f"{initial_sys_prompt}\n\n--- PERSISTENT MEMORY ---\n{memory_content}"
-                    if initial_sys_prompt
-                    else f"--- PERSISTENT MEMORY ---\n{memory_content}"
-                )
-
-            handlers.handle_chat(
-                get_engine(engine_name, api_client.check_api_keys(engine_name)),
-                model_name,
-                api_system_prompt,
-                None,
-                [],
-                attachments,
-                None,
-                None,
-                True,
-                settings["memory_enabled"],
-                False,
-                initial_sys_prompt,
-                default_persona,
-            )
+            run_chat_command(args)
         else:
+            args = chat_parent_parser.parse_args(args_list)
             run_chat_command(args)
 
 
