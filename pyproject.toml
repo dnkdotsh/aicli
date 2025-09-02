@@ -46,9 +46,15 @@ dev = [
 pythonpath = [
   "src"
 ]
+addopts = "--cov=src/aicli --cov-report=term-missing"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.coverage.run]
+omit = [
+    "src/aicli/__init__.py",
+]
