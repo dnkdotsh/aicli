@@ -28,6 +28,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from . import api_client, bootstrap, config, handlers, review, utils
+from . import personas as persona_manager
 from .settings import settings
 
 
@@ -55,12 +56,23 @@ def run_chat_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # --- Argument Validation ---
-    if args.image and args.engine != "openai":
-        print(
-            "Error: --image mode is only supported by the 'openai' engine.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    if args.image:
+        # Pre-resolve engine for validation since persona can set it.
+        effective_engine = args.engine
+        if not effective_engine and args.persona:
+            persona = persona_manager.load_persona(args.persona)
+            if persona and persona.engine:
+                effective_engine = persona.engine
+        if not effective_engine:
+            effective_engine = settings["default_engine"]
+
+        if effective_engine != "openai":
+            print(
+                "Error: --image mode is only supported by the 'openai' engine.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     if args.both is not None and args.prompt:
         print(
             'Error: Provide an initial prompt via --both "PROMPT" or --prompt "PROMPT", but not both.',
@@ -117,8 +129,8 @@ def main() -> None:
         "-e",
         "--engine",
         choices=["openai", "gemini"],
-        default=settings["default_engine"],
-        help="Specify the AI provider.",
+        default=None,
+        help=f"Specify the AI provider. (default: {settings['default_engine']})",
     )
     core_group.add_argument(
         "-m",

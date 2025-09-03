@@ -23,12 +23,15 @@ SessionManager instance.
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from prompt_toolkit import prompt
 from prompt_toolkit.history import InMemoryHistory
 
-from . import utils
+from . import config, utils
+from .logger import log
 from .settings import save_setting
 
 if TYPE_CHECKING:
@@ -112,7 +115,8 @@ def handle_state(args: list[str], session: SessionManager) -> None:
 
 def handle_set(args: list[str], session: SessionManager) -> None:
     if len(args) == 2:
-        save_setting(args[0], args[1])
+        _success, message = save_setting(args[0], args[1])
+        print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
     else:
         print(f"{utils.SYSTEM_MSG}--> Usage: /set <key> <value>.{utils.RESET_COLOR}")
 
@@ -168,6 +172,33 @@ def handle_persona(args: list[str], session: SessionManager) -> None:
 
 
 # --- Multi-Chat Command Handler Functions ---
+
+
+def _save_multichat_session_to_file(
+    state: MultiChatSessionState, filename: str
+) -> bool:
+    safe_name = utils.sanitize_filename(filename.rsplit(".", 1)[0]) + ".json"
+    filepath = config.SESSIONS_DIRECTORY / safe_name
+
+    state_dict = asdict(state)
+    state_dict["session_type"] = "multichat"
+    # Engines are not serializable, so we remove them
+    del state_dict["openai_engine"]
+    del state_dict["gemini_engine"]
+
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(state_dict, f, indent=2)
+        print(
+            f"{utils.SYSTEM_MSG}--> Multi-chat session saved to: {filepath}{utils.RESET_COLOR}"
+        )
+        return True
+    except (OSError, TypeError) as e:
+        log.error("Failed to save multi-chat session state: %s", e)
+        print(
+            f"{utils.SYSTEM_MSG}--> Error saving multi-chat session: {e}{utils.RESET_COLOR}"
+        )
+        return False
 
 
 def handle_multichat_exit(
@@ -291,10 +322,21 @@ def handle_multichat_state(
 def handle_multichat_save(
     args: list[str], state: MultiChatSessionState, cli_history: InMemoryHistory
 ) -> bool:
-    print(
-        f"{utils.SYSTEM_MSG}--> /save is not yet implemented for multi-chat.{utils.RESET_COLOR}"
-    )
-    return False  # Do not exit
+    should_remember, should_stay = "--remember" in args, "--stay" in args
+    filename_parts = [arg for arg in args if arg not in ("--remember", "--stay")]
+    filename = " ".join(filename_parts)
+    if not filename:
+        print(
+            f"{utils.SYSTEM_MSG}--> Usage: /save <filename> [--stay] [--remember]{utils.RESET_COLOR}"
+        )
+        return False
+
+    state.command_history = cli_history.get_strings()
+    if _save_multichat_session_to_file(state, filename):
+        if not should_remember:
+            state.exit_without_memory = True
+        return not should_stay
+    return False
 
 
 # --- Command Dispatcher Maps ---

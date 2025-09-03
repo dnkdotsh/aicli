@@ -22,7 +22,7 @@ import json
 import queue
 import sys
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -449,12 +449,56 @@ class SessionManager:
             filename += ".json"
         filepath = config.SESSIONS_DIRECTORY / filename
         try:
-            new_state = commands.load_session_from_file(filepath)
-            if new_state:
-                self.state = new_state
-                return True
-            return False
-        except Exception as e:
+            with open(filepath, encoding="utf-8") as f:
+                data = json.load(f)
+
+            # --- Start of loading logic ---
+            if "engine_name" not in data or "model" not in data:
+                log.warning(
+                    "Loaded session file %s is missing required keys.", filepath
+                )
+                print(f"{utils.SYSTEM_MSG}--> Invalid session file.{utils.RESET_COLOR}")
+                return False
+
+            if data.get("session_type") == "multichat":
+                log.warning(
+                    "Attempted to load a multi-chat session in a single-chat context."
+                )
+                print(
+                    f"{utils.SYSTEM_MSG}--> Cannot load a multi-chat session here.{utils.RESET_COLOR}"
+                )
+                return False
+
+            engine_name = data.pop("engine_name")
+            api_key = api_client.check_api_keys(engine_name)
+            data["engine"] = get_engine(engine_name, api_key)
+
+            if "attachments" in data:
+                data["attachments"] = {
+                    Path(k): v for k, v in data["attachments"].items()
+                }
+
+            persona_filename = data.get("current_persona")
+            data["current_persona"] = (
+                persona_manager.load_persona(persona_filename)
+                if persona_filename and isinstance(persona_filename, str)
+                else None
+            )
+
+            state_field_names = {f.name for f in fields(SessionState)}
+            filtered_data = {k: v for k, v in data.items() if k in state_field_names}
+
+            self.state = SessionState(**filtered_data)
+            print(
+                f"{utils.SYSTEM_MSG}--> Session '{filepath.name}' loaded successfully.{utils.RESET_COLOR}"
+            )
+            return True
+        except (
+            OSError,
+            json.JSONDecodeError,
+            api_client.MissingApiKeyError,
+            TypeError,
+        ) as e:
             log.error("Error in SessionManager.load: %s", e)
             print(
                 f"{utils.SYSTEM_MSG}--> Error loading session: {e}{utils.RESET_COLOR}"

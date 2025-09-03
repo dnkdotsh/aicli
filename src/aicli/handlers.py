@@ -22,12 +22,9 @@ import datetime
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 from . import api_client, config, utils
-from . import personas as persona_manager
 from .engine import get_engine
-from .logger import log
 from .prompts import MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI
 from .session_manager import (
     MultiChatManager,
@@ -38,95 +35,21 @@ from .session_manager import (
 from .settings import settings
 
 
-def _resolve_config_precedence(args: argparse.Namespace) -> dict[str, Any]:
-    """Determines the final configuration based on CLI args, persona, and settings."""
-    is_single_shot = args.prompt is not None
-
-    # --- Persona Loading ---
-    persona = None
-    if args.persona:
-        persona = persona_manager.load_persona(args.persona)
-        if not persona:
-            log.warning("Persona '%s' not found or is invalid.", args.persona)
-            print(f"Warning: Persona '{args.persona}' not found.", file=sys.stderr)
-    elif not is_single_shot and not args.system_prompt:
-        persona = persona_manager.load_persona(persona_manager.DEFAULT_PERSONA_NAME)
-
-    # --- Configuration Precedence: CLI > Persona > Settings ---
-    engine_from_persona = persona.engine if persona else None
-
-    # Highest precedence: CLI arguments
-    engine_to_use = args.engine
-    model_to_use = args.model
-    max_tokens_to_use = args.max_tokens
-    stream_to_use = args.stream
-
-    # Second precedence: Persona settings (if not overridden by CLI)
-    if engine_to_use == settings["default_engine"] and persona and persona.engine:
-        engine_to_use = persona.engine
-    if (
-        model_to_use is None
-        and persona
-        and persona.model
-        and engine_to_use == engine_from_persona
-    ):
-        model_to_use = persona.model
-    if max_tokens_to_use is None and persona and persona.max_tokens is not None:
-        max_tokens_to_use = persona.max_tokens
-    if stream_to_use is None and persona and persona.stream is not None:
-        stream_to_use = persona.stream
-
-    # Lowest precedence: Application settings defaults
-    if max_tokens_to_use is None:
-        max_tokens_to_use = settings["default_max_tokens"]
-    if stream_to_use is None:
-        stream_to_use = settings["stream"]
-
-    # Final model lookup if still not set
-    if not model_to_use:
-        model_key = (
-            "default_openai_chat_model"
-            if engine_to_use == "openai"
-            else "default_gemini_model"
-        )
-        model_to_use = settings[model_key]
-
-    memory_enabled_for_session = settings["memory_enabled"]
-    if args.memory:
-        memory_enabled_for_session = not memory_enabled_for_session
-    if is_single_shot:
-        memory_enabled_for_session = False
-
-    return {
-        "engine_name": engine_to_use,
-        "model": model_to_use,
-        "max_tokens": max_tokens_to_use,
-        "stream": stream_to_use,
-        "memory_enabled": memory_enabled_for_session,
-        "debug_enabled": args.debug,
-        "persona": persona,
-        "session_name": args.session_name,
-        "system_prompt_arg": args.system_prompt,
-        "files_arg": args.file,
-        "exclude_arg": args.exclude,
-    }
-
-
 def handle_chat(initial_prompt: str | None, args: argparse.Namespace) -> None:
     """Handles both single-shot and interactive chat sessions."""
-    config = _resolve_config_precedence(args)
+    config_params = utils.resolve_config_precedence(args)
 
     session = SessionManager(
-        engine_name=config["engine_name"],
-        model=config["model"],
-        max_tokens=config["max_tokens"],
-        stream_active=config["stream"],
-        memory_enabled=config["memory_enabled"],
-        debug_active=config["debug_enabled"],
-        persona=config["persona"],
-        system_prompt_arg=config["system_prompt_arg"],
-        files_arg=config["files_arg"],
-        exclude_arg=config["exclude_arg"],
+        engine_name=config_params["engine_name"],
+        model=config_params["model"],
+        max_tokens=config_params["max_tokens"],
+        stream_active=config_params["stream"],
+        memory_enabled=config_params["memory_enabled"],
+        debug_active=config_params["debug_enabled"],
+        persona=config_params["persona"],
+        system_prompt_arg=config_params["system_prompt_arg"],
+        files_arg=config_params["files_arg"],
+        exclude_arg=config_params["exclude_arg"],
     )
 
     if initial_prompt:
@@ -134,7 +57,7 @@ def handle_chat(initial_prompt: str | None, args: argparse.Namespace) -> None:
         session.handle_single_shot(initial_prompt)
     else:
         # Interactive mode
-        chat_manager = SingleChatManager(session, config["session_name"])
+        chat_manager = SingleChatManager(session, config_params["session_name"])
         chat_manager.run()
 
 

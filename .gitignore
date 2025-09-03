@@ -22,6 +22,7 @@ venv/
 # Testing artifacts
 .pytest_cache/
 .coverage
+pytest.log
 htmlcov/
 
 # IDE and editor directories
@@ -35,7 +36,7 @@ htmlcov/
 Thumbs.db
 
 # Local application logs
-# Note: The main app now logs to a central XDG directory, 
+# Note: The main app now logs to a central XDG directory,
 # but this will ignore any local logs generated during development.
 logs/
 images/

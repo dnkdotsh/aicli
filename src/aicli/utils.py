@@ -24,14 +24,18 @@ import sys
 import tarfile
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from prompt_toolkit import prompt
 
-from . import config
-from .engine import AIEngine
+from . import config, personas
 from .logger import log
 from .settings import settings
+
+if TYPE_CHECKING:
+    import argparse
+
+    from .engine import AIEngine
 
 # ANSI color codes for prompts
 USER_PROMPT = "\033[94m"  # Bright Blue
@@ -99,11 +103,15 @@ SUPPORTED_EXTENSIONLESS_FILENAMES: set[str] = {
 
 def get_default_model_for_engine(engine_name: str) -> str:
     """Returns the default chat model for a given engine from settings."""
-    model_key = f"default_{engine_name}_chat_model"
+    model_key = (
+        f"default_{engine_name}_chat_model"
+        if engine_name == "openai"
+        else f"default_{engine_name}_model"
+    )
     return settings.get(model_key, "")
 
 
-def select_model(engine: AIEngine, task: str) -> str:
+def select_model(engine: "AIEngine", task: str) -> str:
     """Allows the user to select a model or use the default."""
     default_model = ""
     if task == "chat":
@@ -150,15 +158,6 @@ def read_system_prompt(prompt_or_path: str) -> str:
         except OSError as e:
             log.warning("Could not read system prompt file '%s': %s", prompt_or_path, e)
     return prompt_or_path
-
-
-def ensure_dir_exists(directory_path: Path) -> None:
-    """Creates a directory if it does not already exist."""
-    try:
-        directory_path.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        log.error("Failed to create directory at %s: %s", directory_path, e)
-        sys.exit(1)
 
 
 def is_supported_text_file(filepath: Path) -> bool:
@@ -476,3 +475,76 @@ Multi-Chat Commands:
     else:
         help_text = "No help available for this context."
     print(help_text)
+
+
+def resolve_config_precedence(args: "argparse.Namespace") -> dict[str, Any]:
+    """Determines the final configuration based on CLI args, persona, and settings."""
+    is_single_shot = args.prompt is not None
+
+    # --- Persona Loading ---
+    persona = None
+    if args.persona:
+        persona = personas.load_persona(args.persona)
+        if not persona:
+            log.warning("Persona '%s' not found or is invalid.", args.persona)
+            print(f"Warning: Persona '{args.persona}' not found.", file=sys.stderr)
+    elif not is_single_shot and not args.system_prompt:
+        persona = personas.load_persona(personas.DEFAULT_PERSONA_NAME)
+
+    # --- Configuration Precedence: CLI > Persona > Settings ---
+
+    # 1. Determine Engine
+    if args.engine is not None:
+        engine_to_use = args.engine
+    elif persona and persona.engine:
+        engine_to_use = persona.engine
+    else:
+        engine_to_use = settings["default_engine"]
+
+    # 2. Determine Model (depends on final engine)
+    if args.model is not None:
+        model_to_use = args.model
+    elif (
+        persona
+        and persona.model
+        and (persona.engine is None or persona.engine == engine_to_use)
+    ):
+        model_to_use = persona.model
+    else:
+        model_to_use = get_default_model_for_engine(engine_to_use)
+
+    # 3. Determine other parameters
+    if args.max_tokens is not None:
+        max_tokens_to_use = args.max_tokens
+    elif persona and persona.max_tokens is not None:
+        max_tokens_to_use = persona.max_tokens
+    else:
+        max_tokens_to_use = settings["default_max_tokens"]
+
+    if args.stream is not None:
+        stream_to_use = args.stream
+    elif persona and persona.stream is not None:
+        stream_to_use = persona.stream
+    else:
+        stream_to_use = settings["stream"]
+
+    # 4. Determine memory status
+    memory_enabled_for_session = settings["memory_enabled"]
+    if hasattr(args, "memory") and args.memory:
+        memory_enabled_for_session = not memory_enabled_for_session
+    if is_single_shot:
+        memory_enabled_for_session = False
+
+    return {
+        "engine_name": engine_to_use,
+        "model": model_to_use,
+        "max_tokens": max_tokens_to_use,
+        "stream": stream_to_use,
+        "memory_enabled": memory_enabled_for_session,
+        "debug_enabled": args.debug,
+        "persona": persona,
+        "session_name": args.session_name,
+        "system_prompt_arg": args.system_prompt,
+        "files_arg": args.file,
+        "exclude_arg": args.exclude,
+    }

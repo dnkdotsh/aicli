@@ -4,6 +4,7 @@ Unit tests for the utility functions in aicli/utils.py.
 These tests focus on data manipulation, file processing, and message formatting.
 """
 
+import argparse
 import base64
 import io
 import tarfile
@@ -12,8 +13,182 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-import requests  # Make sure requests is imported for exceptions
-from aicli import config, utils
+from aicli import config, personas, utils
+from aicli.engine import AIEngine
+
+
+# Helper to create a standard mock args namespace for config resolution tests
+def create_mock_args(**kwargs):
+    defaults = {
+        "prompt": None,
+        "engine": None,  # Default is now None
+        "model": None,
+        "persona": None,
+        "system_prompt": None,
+        "file": None,
+        "exclude": None,
+        "memory": False,
+        "session_name": None,
+        "stream": None,
+        "max_tokens": None,
+        "debug": False,
+    }
+    defaults.update(kwargs)
+    return argparse.Namespace(**defaults)
+
+
+class TestResolveConfigPrecedence:
+    """Tests the complex config resolution logic."""
+
+    @pytest.fixture(autouse=True)
+    def setup_config_mocks(self, mocker, fake_fs):
+        # Mock settings for predictable defaults
+        mocker.patch.dict(
+            utils.settings,
+            {
+                "default_engine": "gemini",
+                "stream": True,
+                "memory_enabled": True,
+                "default_max_tokens": 1024,
+                "default_openai_chat_model": "gpt-4o-mini",
+                "default_gemini_model": "gemini-1.5-flash",
+            },
+        )
+        # Mock persona loading
+        self.mock_load_persona = mocker.patch("aicli.personas.load_persona")
+
+        # Create a mock persona object
+        self.mock_persona_obj = MagicMock(spec=personas.Persona)
+        self.mock_persona_obj.engine = "openai"
+        self.mock_persona_obj.model = "gpt-4-persona"
+        self.mock_persona_obj.max_tokens = 2048
+        self.mock_persona_obj.stream = False
+
+    def test_cli_args_have_highest_precedence(self):
+        """CLI arguments should override any persona or default settings."""
+        self.mock_load_persona.return_value = self.mock_persona_obj
+        args = create_mock_args(
+            engine="openai",
+            model="gpt-cli",
+            max_tokens=4096,
+            stream=True,
+            persona="test_persona",
+        )
+
+        config_params = utils.resolve_config_precedence(args)
+
+        assert config_params["engine_name"] == "openai"
+        assert config_params["model"] == "gpt-cli"
+        assert config_params["max_tokens"] == 4096
+        assert config_params["stream"] is True
+
+    def test_persona_overrides_defaults(self):
+        """Persona settings should override default settings."""
+        self.mock_load_persona.return_value = self.mock_persona_obj
+        args = create_mock_args(persona="test_persona")
+
+        config_params = utils.resolve_config_precedence(args)
+
+        assert config_params["engine_name"] == "openai"  # From persona
+        assert config_params["model"] == "gpt-4-persona"  # From persona
+        assert config_params["max_tokens"] == 2048  # From persona
+        assert config_params["stream"] is False  # From persona
+
+    def test_defaults_are_used_when_no_overrides(self):
+        """Default settings should be used when no CLI or persona settings apply."""
+        self.mock_load_persona.return_value = None
+        args = create_mock_args()
+
+        config_params = utils.resolve_config_precedence(args)
+
+        assert config_params["engine_name"] == "gemini"  # Default
+        assert config_params["model"] == "gemini-1.5-flash"  # Default
+        assert config_params["max_tokens"] == 1024  # Default
+        assert config_params["stream"] is True  # Default
+        assert config_params["memory_enabled"] is True  # Default
+
+    def test_memory_toggle(self):
+        """The --memory flag should toggle the default memory setting."""
+        # Test case 1: Default is True, flag should make it False
+        args_with_toggle = create_mock_args(memory=True)
+        config1 = utils.resolve_config_precedence(args_with_toggle)
+        assert not config1["memory_enabled"]
+
+        # Test case 2: Single-shot mode should always disable memory
+        args_single_shot = create_mock_args(prompt="A question", memory=True)
+        config2 = utils.resolve_config_precedence(args_single_shot)
+        assert not config2["memory_enabled"]
+
+    def test_persona_model_only_applies_if_engine_matches(self):
+        """A persona's model should not be used if the engine is overridden by CLI."""
+        self.mock_load_persona.return_value = self.mock_persona_obj
+        # Persona is openai/gpt-4-persona, but CLI forces gemini
+        args = create_mock_args(engine="gemini", persona="test_persona")
+
+        config_params = utils.resolve_config_precedence(args)
+
+        assert config_params["engine_name"] == "gemini"
+        # Model should fall back to the default for Gemini, not the persona's OpenAI model
+        assert config_params["model"] == "gemini-1.5-flash"
+
+
+class TestSelectModel:
+    @pytest.fixture(autouse=True)
+    def setup_select_model_mocks(self, mocker):
+        self.mock_engine = MagicMock(spec=AIEngine)
+        self.mock_engine.name = "openai"
+        self.mock_engine.fetch_available_models.return_value = [
+            "model-a",
+            "model-b",
+            "model-c",
+        ]
+        mocker.patch.dict(
+            utils.settings,
+            {
+                "default_openai_chat_model": "gpt-4o-mini",
+                "default_openai_image_model": "dall-e-3",
+            },
+        )
+        self.mock_prompt = mocker.patch("aicli.utils.prompt")
+
+    def test_select_model_default_selection_chat(self):
+        """Tests that select_model returns the default chat model if user selects 'y'."""
+        self.mock_prompt.return_value = "y"
+        model = utils.select_model(self.mock_engine, "chat")
+        assert model == "gpt-4o-mini"
+        self.mock_engine.fetch_available_models.assert_not_called()
+
+    def test_select_model_default_selection_image(self):
+        """Tests that select_model returns the default image model if user presses Enter."""
+        self.mock_prompt.return_value = ""  # Enter is default 'y'
+        model = utils.select_model(self.mock_engine, "image")
+        assert model == "dall-e-3"
+        self.mock_engine.fetch_available_models.assert_not_called()
+
+    def test_select_model_user_selection(self):
+        """Tests that a valid numeric user choice for a model is returned."""
+        self.mock_prompt.side_effect = ["n", "2"]
+        model = utils.select_model(self.mock_engine, "chat")
+        assert model == "model-b"
+
+    def test_select_model_invalid_selection_falls_back_to_default(self, capsys):
+        """Tests that invalid input for model selection falls back to the default."""
+        self.mock_prompt.side_effect = ["n", "99"]
+        model = utils.select_model(self.mock_engine, "chat")
+        assert model == "gpt-4o-mini"
+        output = capsys.readouterr().out
+        assert "Invalid selection. Using default: gpt-4o-mini" in output
+
+    def test_select_model_no_available_models_falls_back_to_default(self, capsys):
+        """Tests behavior when fetch_available_models returns an empty list."""
+        self.mock_engine.fetch_available_models.return_value = []
+        self.mock_prompt.side_effect = ["n"]
+
+        model = utils.select_model(self.mock_engine, "chat")
+        assert model == "gpt-4o-mini"
+        output = capsys.readouterr().out
+        assert "Fetching available models..." in output
+        assert "Using default: gpt-4o-mini" in output
 
 
 class TestUtils:
@@ -349,107 +524,3 @@ class TestUtils:
             == ""
         )
         assert utils.extract_text_from_message({}) == ""
-
-    def test_process_stream_openai_success(self, mocker, capsys):
-        """Tests process_stream for OpenAI with valid streaming chunks."""
-        mock_response = MagicMock()
-        # Simulate OpenAI streaming chunks with usage data
-        stream_chunks = [
-            b'data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"Hello"}}],"usage":{}}',
-            b'data: {"id":"chatcmpl-2","choices":[{"delta":{"content":" world."}}],"usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11}}',
-            b'data: {"id":"chatcmpl-3","choices":[{"delta":{}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}',
-            b"data: [DONE]",
-        ]
-        mock_response.iter_lines.return_value = stream_chunks
-
-        full_response, tokens = utils.process_stream("openai", mock_response)
-
-        assert full_response == "Hello world."
-        assert tokens["prompt"] == 10
-        assert tokens["completion"] == 5
-        assert tokens["total"] == 15
-        assert capsys.readouterr().out == "Hello world."
-
-    def test_process_stream_gemini_success(self, mocker, capsys):
-        """Tests process_stream for Gemini with valid streaming chunks."""
-        mock_response = MagicMock()
-        # Simulate Gemini streaming chunks with usage data
-        stream_chunks = [
-            b'data: {"candidates":[{"content":{"parts":[{"text":"Gemini"}]}}],"usageMetadata":{}}',
-            b'data: {"candidates":[{"content":{"parts":[{"text":" rocks!"}]}}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":1,"totalTokenCount":13}}',
-            b'data: {"candidates":[{"content":{"parts":[{"text":""}]}}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":7,"cachedContentTokenCount":0,"totalTokenCount":19}}',
-            b"",  # Empty chunk
-        ]
-        mock_response.iter_lines.return_value = stream_chunks
-
-        full_response, tokens = utils.process_stream("gemini", mock_response)
-
-        assert full_response == "Gemini rocks!"
-        assert tokens["prompt"] == 12
-        assert tokens["completion"] == 7
-        assert tokens["total"] == 19
-        assert capsys.readouterr().out == "Gemini rocks!"
-
-    def test_process_stream_interruption(self, mocker, capsys):
-        """Tests that stream interruption (e.g., API error during stream) is handled gracefully."""
-        mock_response = MagicMock()
-
-        # Simulate a stream that raises an exception mid-way
-        def raise_error_iter():
-            yield b'data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"Partial"}}]}'
-            raise requests.exceptions.RequestException("Network error")
-
-        mock_response.iter_lines.return_value = raise_error_iter()
-
-        full_response, tokens = utils.process_stream("openai", mock_response)
-
-        assert full_response == "Partial"
-        assert tokens == {
-            "prompt": 0,
-            "completion": 0,
-            "reasoning": 0,
-            "total": 0,
-        }  # Token counts might be incomplete
-        captured = capsys.readouterr()
-        assert "Partial" in captured.out
-        assert (
-            "--> Stream interrupted by network/API error: Network error" in captured.out
-        )
-
-    def test_parse_token_counts_openai(self):
-        """Tests parsing token counts from a non-streaming OpenAI response."""
-        openai_response = {
-            "usage": {
-                "prompt_tokens": 50,
-                "completion_tokens": 100,
-                "total_tokens": 150,
-            }
-        }
-        p, c, r, t = utils.parse_token_counts("openai", openai_response)
-        assert (p, c, r, t) == (
-            50,
-            100,
-            0,
-            150,
-        )  # reasoning 'r' is not explicitly given by OpenAI's usage for chat
-
-        openai_response_no_usage = {}
-        p, c, r, t = utils.parse_token_counts("openai", openai_response_no_usage)
-        assert (p, c, r, t) == (0, 0, 0, 0)
-
-    def test_parse_token_counts_gemini(self):
-        """Tests parsing token counts from a non-streaming Gemini response."""
-        gemini_response = {
-            "usageMetadata": {
-                "promptTokenCount": 60,
-                "candidatesTokenCount": 120,
-                "totalTokenCount": 180,
-                "cachedContentTokenCount": 5,  # This is now correctly extracted
-            }
-        }
-        p, c, r, t = utils.parse_token_counts("gemini", gemini_response)
-        assert (p, c, r, t) == (60, 120, 5, 180)  # r is now 5, as expected
-
-        gemini_response_no_usage = {}
-        p, c, r, t = utils.parse_token_counts("gemini", gemini_response_no_usage)
-        assert (p, c, r, t) == (0, 0, 0, 0)

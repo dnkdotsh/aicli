@@ -21,34 +21,36 @@ def create_fake_persona(fs, filename: str, content: dict):
 class TestPersonas:
     """Test suite for persona management."""
 
-    def test_ensure_personas_directory_and_default_creates_all(self, fake_fs):
+    def test_create_default_persona_if_missing_creates_all(self, fake_fs):
         """
-        Tests that the function creates the directory and the default file when neither exist.
+        Tests that the function creates the default file when it doesn't exist.
         """
-        # The fake_fs fixture pre-creates this dir; remove it for this specific test.
-        shutil.rmtree(config.PERSONAS_DIRECTORY)
-        assert not config.PERSONAS_DIRECTORY.exists()
-
-        personas.ensure_personas_directory_and_default()
-
-        assert config.PERSONAS_DIRECTORY.is_dir()
+        # The fake_fs fixture pre-creates this dir, but we want to be sure
+        config.PERSONAS_DIRECTORY.mkdir(parents=True, exist_ok=True)
         default_persona_path = (
             config.PERSONAS_DIRECTORY / personas.DEFAULT_PERSONA_FILENAME
         )
+        if default_persona_path.exists():
+            default_persona_path.unlink()
+
+        assert not default_persona_path.exists()
+
+        personas.create_default_persona_if_missing()
+
         assert default_persona_path.is_file()
 
         # Check content of default persona
         with open(default_persona_path, encoding="utf-8") as f:
             data = json.load(f)
         assert data["name"] == "AICLI Assistant"
-        assert "expert knowledge of the AICLI tool" in data["description"]
+        assert "expert knowledge of the AICLI tool itself" in data["description"]
         assert (
             "You are a versatile and helpful general-purpose AI assistant."
             in data["system_prompt"]
         )
         assert "## AICLI Tool Documentation" in data["system_prompt"]
 
-    def test_ensure_personas_directory_does_not_overwrite(self, fake_fs):
+    def test_create_default_persona_if_missing_does_not_overwrite(self, fake_fs):
         """
         Tests that the function does not overwrite an existing default persona file.
         """
@@ -58,7 +60,7 @@ class TestPersonas:
         }
         create_fake_persona(fake_fs, personas.DEFAULT_PERSONA_FILENAME, custom_content)
 
-        personas.ensure_personas_directory_and_default()
+        personas.create_default_persona_if_missing()
 
         default_persona_path = (
             config.PERSONAS_DIRECTORY / personas.DEFAULT_PERSONA_FILENAME

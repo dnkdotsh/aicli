@@ -16,10 +16,21 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import json
+from pathlib import Path
 from typing import Any
 
-from . import config, utils
+from . import config
 from .logger import log
+
+
+def _ensure_dir_exists(directory_path: Path) -> None:
+    """Creates a directory if it does not already exist."""
+    try:
+        directory_path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        log.error("Failed to create directory at %s: %s", directory_path, e)
+        # We raise an exception here so the caller can handle the error message.
+        raise
 
 
 def _get_default_settings() -> dict[str, Any]:
@@ -58,12 +69,14 @@ def _load_settings() -> dict[str, Any]:
         return defaults
 
 
-def save_setting(key: str, value: str) -> None:
-    """Saves a single setting to the JSON file after type conversion."""
+def save_setting(key: str, value: str) -> tuple[bool, str]:
+    """
+    Saves a single setting to the JSON file after type conversion.
+    Returns a tuple of (success_boolean, message_string).
+    """
     default_settings = _get_default_settings()
     if key not in default_settings:
-        print(f"{utils.SYSTEM_MSG}--> Unknown setting: '{key}'.{utils.RESET_COLOR}")
-        return
+        return False, f"Unknown setting: '{key}'."
 
     current_settings = _load_settings()
     original_type = type(default_settings.get(key))
@@ -80,8 +93,7 @@ def save_setting(key: str, value: str) -> None:
         elif original_type == int:
             converted_value = int(value)
     except ValueError as e:
-        print(f"{utils.SYSTEM_MSG}--> Error: {e}{utils.RESET_COLOR}")
-        return
+        return False, f"Error: {e}"
 
     current_settings[key] = converted_value
 
@@ -90,15 +102,14 @@ def save_setting(key: str, value: str) -> None:
     }
 
     try:
-        utils.ensure_dir_exists(config.CONFIG_DIR)
+        _ensure_dir_exists(config.CONFIG_DIR)
         with open(config.SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(user_settings_to_save, f, indent=2)
-        print(
-            f"{utils.SYSTEM_MSG}--> Setting '{key}' updated to '{converted_value}'.{utils.RESET_COLOR}"
-        )
         settings[key] = converted_value
+        return True, f"Setting '{key}' updated to '{converted_value}'."
     except OSError as e:
         log.error("Failed to save settings: %s", e)
+        return False, f"Error saving settings file: {e}"
 
 
 settings: dict[str, Any] = _load_settings()
