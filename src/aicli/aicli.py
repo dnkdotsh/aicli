@@ -28,7 +28,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from . import api_client, config, handlers, review, utils
+from . import api_client, bootstrap, config, handlers, review, utils
 from . import personas as persona_manager
 from .engine import get_engine
 from .settings import settings
@@ -242,12 +242,13 @@ def run_chat_command(args):
 
 def main():
     """Parses arguments and orchestrates the application flow."""
-    utils.ensure_dir_exists(config.CONFIG_DIR)
+    # The bootstrap function handles all first-run setup, directory creation,
+    # and default file generation. It must be called before any other
+    # application logic that depends on the file structure.
+    bootstrap.ensure_project_structure()
+
+    # Load environment variables AFTER the bootstrap may have created the .env file.
     load_dotenv(dotenv_path=config.DOTENV_FILE)
-    utils.ensure_dir_exists(config.LOG_DIRECTORY)
-    utils.ensure_dir_exists(config.IMAGE_DIRECTORY)
-    utils.ensure_dir_exists(config.SESSIONS_DIRECTORY)
-    persona_manager.ensure_personas_directory_and_default()
 
     chat_parent_parser = argparse.ArgumentParser(add_help=False)
     core_group = chat_parent_parser.add_argument_group("Core Execution")

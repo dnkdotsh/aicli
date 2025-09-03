@@ -1,14 +1,13 @@
 # src/aicli/personas.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 Dank A. Saurus
+# Copyright (C) 2025 David
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY;
-# without even the implied warranty of
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -20,6 +19,7 @@ Manages AI personas, including loading, listing, and creating defaults.
 """
 
 import json
+import sys
 from dataclasses import dataclass, field
 
 from . import config
@@ -42,7 +42,6 @@ AICLI is a command-line interface for interacting with AI models like OpenAI's G
 - **Persistent Memory**: A long-term memory file (`~/.local/share/aicli/persistent_memory.txt`) that the AI can learn from across sessions. Enabled by default.
 - **Session Management**: Save and load entire conversations using `/save` and `/load` (or `aicli -l <file>`). Saved sessions are stored in `~/.local/share/aicli/sessions/`.
 - **Multi-Chat**: Use the `-b` or `--both` flag to have OpenAI and Gemini respond to the same prompts simultaneously.
-
 ### Interactive Commands
 - `/help`: Show this help message.
 - `/exit [name]`: End the session, optionally naming the log file.
@@ -96,20 +95,23 @@ def _get_default_persona_content() -> dict:
     }
 
 
-def ensure_personas_directory_and_default():
-    """
-    Ensures the personas directory exists and creates the default persona
-    if it does not.
-    """
+def create_default_persona_if_missing():
+    """Creates the default persona file if it does not already exist."""
+    default_persona_path = config.PERSONAS_DIRECTORY / DEFAULT_PERSONA_FILENAME
+    if default_persona_path.exists():
+        return
+
     try:
-        config.PERSONAS_DIRECTORY.mkdir(parents=True, exist_ok=True)
-        default_persona_path = config.PERSONAS_DIRECTORY / DEFAULT_PERSONA_FILENAME
-        if not default_persona_path.exists():
-            with open(default_persona_path, "w", encoding="utf-8") as f:
-                json.dump(_get_default_persona_content(), f, indent=2)
-            log.info("Created default persona file at %s", default_persona_path)
+        with open(default_persona_path, "w", encoding="utf-8") as f:
+            json.dump(_get_default_persona_content(), f, indent=2)
+        log.info("Created default persona file at %s", default_persona_path)
     except OSError as e:
-        log.error("Failed to create personas directory or default persona: %s", e)
+        log.error("Failed to create default persona file: %s", e)
+        # A warning is sufficient; the app can run without the default persona.
+        print(
+            f"Warning: Could not create the default persona file at {default_persona_path}: {e}",
+            file=sys.stderr,
+        )
 
 
 def load_persona(name: str) -> Persona | None:
