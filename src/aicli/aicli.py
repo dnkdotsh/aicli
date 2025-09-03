@@ -22,15 +22,12 @@ Main entry point for the application.
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from . import api_client, bootstrap, config, handlers, review, utils
-from . import personas as persona_manager
-from .engine import get_engine
 from .settings import settings
 
 
@@ -40,7 +37,7 @@ class CustomHelpFormatter(
     """Custom formatter for argparse help messages."""
 
 
-def run_chat_command(args):
+def run_chat_command(args: argparse.Namespace) -> None:
     """Orchestrates the application flow for all chat-related commands."""
     prompt = args.prompt
     if args.both is not None and args.both != "":
@@ -57,66 +54,8 @@ def run_chat_command(args):
         )
         sys.exit(1)
 
-    # --- Persona Loading ---
-    persona = None
-    if args.persona:
-        persona = persona_manager.load_persona(args.persona)
-        if not persona:
-            print(
-                f"Error: Persona '{args.persona}' not found or is invalid.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-    # If interactive and no other persona/prompt is set, load the default.
-    elif not is_single_shot and not args.system_prompt:
-        persona = persona_manager.load_persona(persona_manager.DEFAULT_PERSONA_NAME)
-
-    # --- Configuration Precedence: CLI > Persona > Settings ---
-    engine_from_persona = persona.engine if persona else None
-
-    # Highest precedence: CLI arguments
-    # Note: args.engine defaults to settings['default_engine'], which is correct for this logic.
-    engine_to_use = args.engine
-    model_to_use = args.model
-    max_tokens_to_use = (
-        args.max_tokens if args.max_tokens != settings["default_max_tokens"] else None
-    )
-    stream_to_use = args.stream  # Can be True, False, or None
-
-    # Second precedence: Persona settings (if not overridden by CLI)
-    if engine_to_use == settings["default_engine"] and persona and persona.engine:
-        engine_to_use = persona.engine
-    # CRITICAL: Only use the persona's model if the engine wasn't overridden by a direct CLI flag.
-    # This prevents using a Gemini model with the OpenAI engine.
-    if (
-        model_to_use is None
-        and persona
-        and persona.model
-        and engine_to_use == engine_from_persona
-    ):
-        model_to_use = persona.model
-    if max_tokens_to_use is None and persona and persona.max_tokens is not None:
-        max_tokens_to_use = persona.max_tokens
-    if stream_to_use is None and persona and persona.stream is not None:
-        stream_to_use = persona.stream
-
-    # Lowest precedence: Application settings defaults
-    if max_tokens_to_use is None:
-        max_tokens_to_use = settings["default_max_tokens"]
-    if stream_to_use is None:
-        stream_to_use = settings["stream"]
-
-    # Final model lookup if still not set
-    if not model_to_use:
-        model_key = (
-            "default_openai_chat_model"
-            if engine_to_use == "openai"
-            else "default_gemini_model"
-        )
-        model_to_use = settings[model_key]
-
     # --- Argument Validation ---
-    if args.image and engine_to_use != "openai":
+    if args.image and args.engine != "openai":
         print(
             "Error: --image mode is only supported by the 'openai' engine.",
             file=sys.stderr,
@@ -129,101 +68,24 @@ def run_chat_command(args):
         )
         sys.exit(1)
     if args.file:
-        for path in args.file:
-            if not os.path.exists(path):
+        for path_str in args.file:
+            if not Path(path_str).exists():
                 print(
-                    f"Error: The file or directory '{path}' does not exist.",
+                    f"Error: The file or directory '{path_str}' does not exist.",
                     file=sys.stderr,
                 )
                 sys.exit(1)
-
-    is_chat_implied = (
-        args.prompt
-        or args.file
-        or args.memory
-        or args.session_name
-        or args.system_prompt
-        or args.persona
-    )
-    if (not args.image and args.both is None and not args.load) and (
-        is_chat_implied or not args.chat
-    ):
-        args.chat = True
-
-    memory_enabled_for_session = settings["memory_enabled"]
-    if args.memory:
-        memory_enabled_for_session = not memory_enabled_for_session
-    if is_single_shot:
-        memory_enabled_for_session = False
-
-    memory_content, attachments, image_data = utils.process_files(
-        args.file, memory_enabled_for_session, args.exclude
-    )
-
-    initial_system_prompt = None
-    if args.system_prompt:
-        try:
-            initial_system_prompt = utils.read_system_prompt(args.system_prompt)
-        except (OSError, FileNotFoundError) as e:
-            print(f"Error reading system prompt file: {e}", file=sys.stderr)
-            sys.exit(1)
-    elif persona and persona.system_prompt:
-        initial_system_prompt = persona.system_prompt
-
-    system_prompt_parts = []
-    if initial_system_prompt:
-        system_prompt_parts.append(initial_system_prompt)
-    if memory_content:
-        system_prompt_parts.append(f"--- PERSISTENT MEMORY ---\n{memory_content}")
-    final_api_system_prompt = (
-        "\n\n".join(system_prompt_parts) if system_prompt_parts else None
-    )
 
     try:
         if args.load:
             handlers.handle_load_session(args.load)
         elif args.both is not None:
-            attachment_texts = [
-                f"--- FILE: {path.as_posix()} ---\n{content}"
-                for path, content in attachments.items()
-            ]
-            attachments_str = "\n\n".join(attachment_texts)
-            full_system_prompt = final_api_system_prompt
-            if attachments_str:
-                full_system_prompt = (
-                    full_system_prompt or ""
-                ) + f"\n\n--- ATTACHED FILES ---\n{attachments_str}"
-            handlers.handle_multichat_session(
-                prompt,
-                full_system_prompt,
-                image_data,
-                args.session_name,
-                max_tokens_to_use,
-                args.debug,
-            )
-        elif args.chat:
-            api_key = api_client.check_api_keys(engine_to_use)
-            engine_instance = get_engine(engine_to_use, api_key)
-            handlers.handle_chat(
-                engine_instance,
-                model_to_use,
-                final_api_system_prompt,
-                prompt,
-                image_data,
-                attachments,
-                args.session_name,
-                max_tokens_to_use,
-                stream_to_use,
-                memory_enabled_for_session,
-                args.debug,
-                initial_system_prompt,
-                persona,
-            )
+            handlers.handle_multichat_session(prompt, args)
         elif args.image:
-            api_key = api_client.check_api_keys(engine_to_use)
-            engine_instance = get_engine(engine_to_use, api_key)
-            image_prompt = prompt or initial_system_prompt
-            handlers.handle_image_generation(api_key, engine_instance, image_prompt)
+            handlers.handle_image_generation(prompt, args)
+        else:  # Default to single chat mode (interactive or single-shot)
+            handlers.handle_chat(prompt, args)
+
     except api_client.MissingApiKeyError as e:
         print(
             f"{utils.SYSTEM_MSG}Configuration Error:{utils.RESET_COLOR}",
@@ -240,14 +102,9 @@ def run_chat_command(args):
         sys.exit(1)
 
 
-def main():
+def main() -> None:
     """Parses arguments and orchestrates the application flow."""
-    # The bootstrap function handles all first-run setup, directory creation,
-    # and default file generation. It must be called before any other
-    # application logic that depends on the file structure.
     bootstrap.ensure_project_structure()
-
-    # Load environment variables AFTER the bootstrap may have created the .env file.
     load_dotenv(dotenv_path=config.DOTENV_FILE)
 
     chat_parent_parser = argparse.ArgumentParser(add_help=False)
@@ -349,8 +206,7 @@ def main():
     session_group.add_argument(
         "--max-tokens",
         type=int,
-        default=settings["default_max_tokens"],
-        help="Set the maximum number of tokens to generate.",
+        help=f"Set the maximum number of tokens to generate. (default: {settings['default_max_tokens']})",
     )
     session_group.add_argument(
         "--debug",
@@ -392,26 +248,12 @@ def main():
         if is_chat_command:
             args_list = args_list[1:]
 
-        # Handle the `aicli` command with no arguments for interactive mode.
+        # Handle `aicli` with no arguments for interactive mode.
         if not args_list and sys.stdin.isatty():
-            args = argparse.Namespace(
-                chat=True,
-                image=False,
-                both=None,
-                load=None,
-                prompt=None,
-                file=None,
-                exclude=None,
-                memory=False,  # Let run_chat_command use the setting's default
-                session_name=None,
-                system_prompt=None,
-                persona=None,  # Let run_chat_command load the default persona
-                engine=settings["default_engine"],
-                model=None,
-                max_tokens=settings["default_max_tokens"],
-                stream=None,
-                debug=False,
-            )
+            # Create a default args namespace for interactive mode
+            args = chat_parent_parser.parse_args([])
+            args.prompt = None
+            args.chat = True  # Ensure chat mode is active
             run_chat_command(args)
         else:
             args = chat_parent_parser.parse_args(args_list)

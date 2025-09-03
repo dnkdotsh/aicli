@@ -40,7 +40,7 @@ SYSTEM_MSG = "\033[93m"  # Bright Yellow
 DIRECTOR_PROMPT = "\033[95m"  # Bright Magenta
 RESET_COLOR = "\033[0m"
 
-SUPPORTED_TEXT_EXTENSIONS = {
+SUPPORTED_TEXT_EXTENSIONS: set[str] = {
     ".txt",
     ".md",
     ".py",
@@ -78,9 +78,14 @@ SUPPORTED_TEXT_EXTENSIONS = {
     ".log",
     ".toml",
 }
-SUPPORTED_IMAGE_MIMETYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-SUPPORTED_ARCHIVE_EXTENSIONS = {".zip", ".tar", ".gz", ".tgz"}
-SUPPORTED_EXTENSIONLESS_FILENAMES = {
+SUPPORTED_IMAGE_MIMETYPES: set[str] = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+}
+SUPPORTED_ARCHIVE_EXTENSIONS: set[str] = {".zip", ".tar", ".gz", ".tgz"}
+SUPPORTED_EXTENSIONLESS_FILENAMES: set[str] = {
     "dockerfile",
     "makefile",
     "vagrantfile",
@@ -92,15 +97,17 @@ SUPPORTED_EXTENSIONLESS_FILENAMES = {
 }
 
 
+def get_default_model_for_engine(engine_name: str) -> str:
+    """Returns the default chat model for a given engine from settings."""
+    model_key = f"default_{engine_name}_chat_model"
+    return settings.get(model_key, "")
+
+
 def select_model(engine: AIEngine, task: str) -> str:
     """Allows the user to select a model or use the default."""
     default_model = ""
     if task == "chat":
-        default_model = (
-            settings["default_openai_chat_model"]
-            if engine.name == "openai"
-            else settings["default_gemini_model"]
-        )
+        default_model = get_default_model_for_engine(engine.name)
     elif task == "image":
         default_model = settings["default_openai_image_model"]
 
@@ -136,13 +143,16 @@ def select_model(engine: AIEngine, task: str) -> str:
 
 def read_system_prompt(prompt_or_path: str) -> str:
     """Reads a system prompt from a file path or returns the string directly."""
-    if os.path.exists(prompt_or_path):
-        with open(prompt_or_path, encoding="utf-8") as f:
-            return f.read()
+    path = Path(prompt_or_path)
+    if path.exists() and path.is_file():
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError as e:
+            log.warning("Could not read system prompt file '%s': %s", prompt_or_path, e)
     return prompt_or_path
 
 
-def ensure_dir_exists(directory_path: Path):
+def ensure_dir_exists(directory_path: Path) -> None:
     """Creates a directory if it does not already exist."""
     try:
         directory_path.mkdir(parents=True, exist_ok=True)
@@ -155,15 +165,14 @@ def is_supported_text_file(filepath: Path) -> bool:
     """Check if a file is a supported text file based on its extension or name."""
     if filepath.suffix.lower() in SUPPORTED_TEXT_EXTENSIONS:
         return True
-    # If there's no extension, check against the list of known filenames.
-    if not filepath.suffix:
-        return filepath.name.lower() in SUPPORTED_EXTENSIONLESS_FILENAMES
-    return False
+    return (
+        not filepath.suffix
+        and filepath.name.lower() in SUPPORTED_EXTENSIONLESS_FILENAMES
+    )
 
 
 def is_supported_archive_file(filepath: Path) -> bool:
     """Check if a file is a supported archive file."""
-    # Handles multi-part extensions like .tar.gz
     return any(
         filepath.name.lower().endswith(ext) for ext in SUPPORTED_ARCHIVE_EXTENSIONS
     )
@@ -176,8 +185,8 @@ def is_supported_image_file(filepath: Path) -> bool:
 
 
 def process_files(
-    paths: list | None, use_memory: bool, exclusions: list | None
-) -> tuple[str | None, dict, list]:
+    paths: list[str] | None, use_memory: bool, exclusions: list[str] | None
+) -> tuple[str | None, dict[Path, str], list[dict[str, Any]]]:
     """
     Processes files, directories, and memory to build context.
     Returns memory content, a dictionary of attachment paths to content, and image data.
@@ -185,21 +194,19 @@ def process_files(
     paths = paths or []
     exclusions = exclusions or []
 
-    memory_content_parts = []
-    attachments_dict = {}
-    image_data_parts = []
+    memory_content: str | None = None
+    attachments_dict: dict[Path, str] = {}
+    image_data_parts: list[dict[str, Any]] = []
 
-    if use_memory and os.path.exists(config.PERSISTENT_MEMORY_FILE):
+    if use_memory and config.PERSISTENT_MEMORY_FILE.exists():
         try:
-            with open(config.PERSISTENT_MEMORY_FILE, encoding="utf-8") as f:
-                memory_content_parts.append(f.read())
+            memory_content = config.PERSISTENT_MEMORY_FILE.read_text(encoding="utf-8")
         except OSError as e:
             log.warning("Could not read persistent memory file: %s", e)
 
     exclusion_paths = {Path(p).resolve() for p in exclusions}
 
     def process_text_file(filepath: Path):
-        """Helper to read and store text file content in the dictionary."""
         try:
             with open(filepath, encoding="utf-8", errors="ignore") as f:
                 attachments_dict[filepath] = f.read()
@@ -207,7 +214,6 @@ def process_files(
             log.warning("Could not read file %s: %s", filepath, e)
 
     def process_image_file(filepath: Path):
-        """Helper to read and encode image file data."""
         try:
             with open(filepath, "rb") as image_file:
                 encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
@@ -220,14 +226,13 @@ def process_files(
             log.warning("Could not read image file %s: %s", filepath, e)
 
     def process_zip_file(zip_path: Path):
-        """Helper to process text files within a zip archive."""
         try:
             with zipfile.ZipFile(zip_path, "r") as z:
                 zip_content_parts = []
                 for filename in z.namelist():
-                    if filename.endswith("/"):
-                        continue
-                    if Path(filename).name in {p.name for p in exclusion_paths}:
+                    if filename.endswith("/") or Path(filename).name in {
+                        p.name for p in exclusion_paths
+                    }:
                         continue
                     if is_supported_text_file(Path(filename)):
                         with z.open(filename) as f:
@@ -241,17 +246,15 @@ def process_files(
             log.warning("Could not process zip file %s: %s", zip_path, e)
 
     def process_tar_file(tar_path: Path):
-        """Helper to process text files within a tar archive."""
         try:
-            with tarfile.open(tar_path, "r:*") as t:  # 'r:*' auto-detects compression
+            with tarfile.open(tar_path, "r:*") as t:
                 tar_content_parts = []
                 for member in t.getmembers():
-                    if not member.isfile():
+                    if not member.isfile() or Path(member.name).name in {
+                        p.name for p in exclusion_paths
+                    }:
                         continue
-                    member_path = Path(member.name)
-                    if member_path.name in {p.name for p in exclusion_paths}:
-                        continue
-                    if is_supported_text_file(member_path):
+                    if is_supported_text_file(Path(member.name)):
                         file_obj = t.extractfile(member)
                         if file_obj:
                             content = file_obj.read().decode("utf-8", errors="ignore")
@@ -265,18 +268,13 @@ def process_files(
 
     for p_str in paths:
         path_obj = Path(p_str).resolve()
-
-        if path_obj in exclusion_paths:
+        if path_obj in exclusion_paths or not path_obj.exists():
             continue
-        if not path_obj.exists():
-            log.warning("Path not found, skipping: %s", path_obj)
-            continue
-
         if path_obj.is_file():
             if is_supported_archive_file(path_obj):
                 if path_obj.suffix.lower() == ".zip":
                     process_zip_file(path_obj)
-                else:  # Handles .tar, .tar.gz, .tgz
+                else:
                     process_tar_file(path_obj)
             elif is_supported_text_file(path_obj):
                 process_text_file(path_obj)
@@ -297,21 +295,19 @@ def process_files(
                     elif is_supported_image_file(file_path):
                         process_image_file(file_path)
 
-    memory_str = "\n".join(memory_content_parts) if memory_content_parts else None
-    return memory_str, attachments_dict, image_data_parts
+    return memory_content, attachments_dict, image_data_parts
 
 
 def sanitize_filename(name: str) -> str:
-    r"""
-    Sanitizes a string to be a valid filename.
-    Allows unicode word characters as regex \w (default) includes them.
-    """
+    r"""Sanitizes a string to be a valid filename."""
     name = re.sub(r"[^\w\s-]", "", name).strip()
     name = re.sub(r"[-\s]+", "_", name)
     return name or "unnamed_log"
 
 
-def translate_history(history: list, target_engine: str) -> list:
+def translate_history(
+    history: list[dict[str, Any]], target_engine: str
+) -> list[dict[str, Any]]:
     """Translates a conversation history to the target engine's format."""
     translated = []
     for msg in history:
@@ -319,46 +315,40 @@ def translate_history(history: list, target_engine: str) -> list:
         if role not in ["user", "assistant", "model"]:
             continue
         text_content = extract_text_from_message(msg)
-        if role in ["user"]:
+        if role == "user":
             translated.append(construct_user_message(target_engine, text_content, []))
         elif role in ["assistant", "model"]:
             translated.append(construct_assistant_message(target_engine, text_content))
     return translated
 
 
-def construct_user_message(engine_name: str, text: str, image_data: list) -> dict:
+def construct_user_message(
+    engine_name: str, text: str, image_data: list[dict[str, Any]]
+) -> dict[str, Any]:
     """Constructs a user message in the format expected by the specified engine."""
-    content = []
+    content: list[dict[str, Any]] = []
     if engine_name == "openai":
         content.append({"type": "text", "text": text})
-    else:
-        content.append({"text": text})
-    if image_data:
         for img in image_data:
-            if engine_name == "openai":
-                content.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{img['mime_type']};base64,{img['data']}"
-                        },
-                    }
-                )
-            else:
-                content.append(
-                    {
-                        "inline_data": {
-                            "mime_type": img["mime_type"],
-                            "data": img["data"],
-                        }
-                    }
-                )
-    if engine_name == "openai":
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{img['mime_type']};base64,{img['data']}"
+                    },
+                }
+            )
         return {"role": "user", "content": content}
-    return {"role": "user", "parts": content}
+    else:  # Gemini
+        content.append({"text": text})
+        for img in image_data:
+            content.append(
+                {"inline_data": {"mime_type": img["mime_type"], "data": img["data"]}}
+            )
+        return {"role": "user", "parts": content}
 
 
-def construct_assistant_message(engine_name: str, text: str) -> dict:
+def construct_assistant_message(engine_name: str, text: str) -> dict[str, Any]:
     """Constructs an assistant message in the format expected by the specified engine."""
     if engine_name == "openai":
         return {"role": "assistant", "content": text}
@@ -366,50 +356,66 @@ def construct_assistant_message(engine_name: str, text: str) -> dict:
 
 
 def extract_text_from_message(message: dict[str, Any]) -> str:
-    """
-    Extracts the text part from a potentially complex message object from
-    either OpenAI or Gemini format.
-    """
+    """Extracts the text part from a potentially complex message object."""
     content = message.get("content")
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        for part in content:
-            if isinstance(part, dict) and part.get("type") == "text":
-                return part.get("text", "")
+        return next(
+            (
+                p.get("text", "")
+                for p in content
+                if isinstance(p, dict) and p.get("type") == "text"
+            ),
+            "",
+        )
+
     parts = message.get("parts")
     if isinstance(parts, list):
-        for part in parts:
-            if isinstance(part, dict) and "text" in part:
-                return part.get("text", "")
+        return next(
+            (p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p),
+            "",
+        )
+
     return message.get("text", "")
 
 
-def format_token_string(token_dict: dict) -> str:
+def format_token_string(token_dict: dict[str, int]) -> str:
     """Formats the token dictionary into a consistent string for display."""
-    p = token_dict.get("prompt", 0)
-    c = token_dict.get("completion", 0)
-    t = token_dict.get("total", 0)
-    r_api = token_dict.get("reasoning", 0)
-    if not any([p, c, t]):
-        return ""
-    r = r_api if r_api > 0 else max(0, t - (p + c))
-    return f"\n{SYSTEM_MSG}[P:{p}/C:{c}/R:{r}/T:{t}]{RESET_COLOR}"
+    p, c, t = (
+        token_dict.get("prompt", 0),
+        token_dict.get("completion", 0),
+        token_dict.get("total", 0),
+    )
+    r = token_dict.get("reasoning", 0) or max(0, t - (p + c))
+    return (
+        f"\n{SYSTEM_MSG}[P:{p}/C:{c}/R:{r}/T:{t}]{RESET_COLOR}"
+        if any([p, c, t])
+        else ""
+    )
+
+
+def format_bytes(byte_count: int) -> str:
+    """Converts a byte count to a human-readable string (KB, MB, etc.)."""
+    if byte_count is None:
+        return "0 B"
+    power, n = 1024, 0
+    power_labels = {0: "B", 1: "KB", 2: "MB", 3: "GB"}
+    while byte_count >= power and n < len(power_labels) - 1:
+        byte_count /= power
+        n += 1
+    return f"{byte_count:.2f} {power_labels[n]}"
 
 
 def clean_ai_response_text(engine_name: str, raw_response: str) -> str:
-    """
-    Strips any self-labels the AI might have added despite system prompts,
-    returning only the cleaned response text without any client-side prefix.
-    """
-    ai_label_pattern = re.compile(
+    """Strips any self-labels the AI might have added."""
+    pattern = re.compile(
         r"^\[" + re.escape(engine_name.capitalize()) + r"\]:?\s*", re.IGNORECASE
     )
-    cleaned_response = ai_label_pattern.sub("", raw_response.lstrip())
-    return cleaned_response
+    return pattern.sub("", raw_response.lstrip())
 
 
-def display_help(context: str):
+def display_help(context: str) -> None:
     """Displays help information for the given context (chat or multichat)."""
     if context == "chat":
         help_text = """
@@ -467,4 +473,6 @@ Multi-Chat Commands:
   /ai <gpt|gem> [prompt]    Send a targeted prompt to only one AI.
                             If no prompt, the AI is asked to continue.
 """
+    else:
+        help_text = "No help available for this context."
     print(help_text)

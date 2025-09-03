@@ -21,6 +21,7 @@ Manages AI personas, including loading, listing, and creating defaults.
 import json
 import sys
 from dataclasses import dataclass, field
+from typing import Any
 
 from . import config
 from .logger import log
@@ -75,10 +76,10 @@ class Persona:
     max_tokens: int | None = None
     stream: bool | None = None
     # This field is for internal use and not loaded from the JSON
-    raw_content: dict = field(default_factory=dict, repr=False)
+    raw_content: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
-def _get_default_persona_content() -> dict:
+def _get_default_persona_content() -> dict[str, Any]:
     """Returns the content for the default persona file."""
     return {
         "name": "AICLI Assistant",
@@ -95,7 +96,7 @@ def _get_default_persona_content() -> dict:
     }
 
 
-def create_default_persona_if_missing():
+def create_default_persona_if_missing() -> None:
     """Creates the default persona file if it does not already exist."""
     default_persona_path = config.PERSONAS_DIRECTORY / DEFAULT_PERSONA_FILENAME
     if default_persona_path.exists():
@@ -153,7 +154,7 @@ def load_persona(name: str) -> Persona | None:
 
 def list_personas() -> list[Persona]:
     """Lists all valid personas found in the personas directory."""
-    personas = []
+    personas: list[Persona] = []
     if not config.PERSONAS_DIRECTORY.exists():
         return []
 

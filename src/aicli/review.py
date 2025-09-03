@@ -19,6 +19,7 @@
 An interactive tool to review, manage, and re-enter aicli sessions and logs.
 """
 
+import argparse
 import json
 import os
 import platform
@@ -37,7 +38,7 @@ else:
 from . import config, utils
 
 
-def get_single_char(prompt=""):
+def get_single_char(prompt: str = "") -> str:
     """Gets a single character from standard input without requiring Enter."""
     if prompt:
         print(prompt, end="", flush=True)
@@ -59,7 +60,7 @@ def get_single_char(prompt=""):
         return char
 
 
-def present_numbered_menu(title: str, options: list) -> int | None:
+def present_numbered_menu(title: str, options: list[str]) -> int | None:
     """Displays a multi-column, numbered menu and returns the user's choice index."""
     print(f"\n--- {title} ---")
     terminal_width = shutil.get_terminal_size().columns
@@ -98,7 +99,7 @@ def present_numbered_menu(title: str, options: list) -> int | None:
     return None
 
 
-def present_action_menu(title: str, options: dict) -> str:
+def present_action_menu(title: str, options: dict[str, str]) -> str:
     """Displays a single-line, letter-based action menu and returns the chosen character."""
     print(f"\n--- {title} ---")
     menu_parts = []
@@ -132,7 +133,7 @@ def get_turn_count(file_path: Path) -> int:
     return 0
 
 
-def replay_file(file_path: Path):
+def replay_file(file_path: Path) -> None:
     """Reads a log or session file and prints the conversation in a formatted, paged way."""
     print(
         f"\n{utils.SYSTEM_MSG}--- Start of replay for: {file_path.name} ---{utils.RESET_COLOR}\n"
@@ -196,7 +197,7 @@ def replay_file(file_path: Path):
     print(f"\n{utils.SYSTEM_MSG}--- End of replay ---{utils.RESET_COLOR}")
 
 
-def rename_file(file_path: Path):
+def rename_file(file_path: Path) -> Path | None:
     """Prompts for a new name and renames the given file."""
     try:
         new_base_name = input(f"Enter new name for '{file_path.stem}' (no extension): ")
@@ -219,7 +220,7 @@ def rename_file(file_path: Path):
     return None
 
 
-def delete_file(file_path: Path):
+def delete_file(file_path: Path) -> bool:
     """Prompts for confirmation and deletes the given file."""
     print(
         f"\n{utils.SYSTEM_MSG}Permanently delete '{file_path.name}'? (y/N) {utils.RESET_COLOR}",
@@ -240,7 +241,7 @@ def delete_file(file_path: Path):
     return False
 
 
-def reenter_session(file_path: Path):
+def reenter_session(file_path: Path) -> None:
     """Launches the main aicli application to load a session."""
     print(
         f"\n{utils.SYSTEM_MSG}--> Re-entering session '{file_path.name}'...{utils.RESET_COLOR}"
@@ -256,7 +257,7 @@ def reenter_session(file_path: Path):
         print(f"Error launching aicli: {e}", file=sys.stderr)
 
 
-def main(args):
+def main(args: argparse.Namespace) -> None:
     """Main application loop for review mode."""
     # Direct replay mode
     if args.file:
@@ -297,7 +298,12 @@ def main(args):
                 turn_count = get_turn_count(selected_path)
                 menu_title = f"Actions for '{selected_path.name}' ({turn_count} turns)"
 
-                action_map = {"Replay": "r", "Rename": "n", "Delete": "d", "Back": "b"}
+                action_map: dict[str, str] = {
+                    "Replay": "r",
+                    "Rename": "n",
+                    "Delete": "d",
+                    "Back": "b",
+                }
                 if is_session:
                     action_map.update({"Re-enter Session": "e"})
 
@@ -307,7 +313,11 @@ def main(args):
                     break
                 elif choice_char == "r":
                     replay_file(selected_path)
-                    post_map = {"Rename": "n", "Delete": "d", "Continue": "c"}
+                    post_map: dict[str, str] = {
+                        "Rename": "n",
+                        "Delete": "d",
+                        "Continue": "c",
+                    }
                     post_choice = present_action_menu("Post-Replay Actions", post_map)
                     if post_choice == "n":
                         new_path = rename_file(selected_path)

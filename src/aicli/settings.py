@@ -16,12 +16,13 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import json
+from typing import Any
 
 from . import config, utils
 from .logger import log
 
 
-def _get_default_settings():
+def _get_default_settings() -> dict[str, Any]:
     """Returns a dictionary of the default application settings."""
     return {
         # --- General ---
@@ -42,7 +43,7 @@ def _get_default_settings():
     }
 
 
-def _load_settings():
+def _load_settings() -> dict[str, Any]:
     """Loads settings from the JSON file, merging them with defaults."""
     defaults = _get_default_settings()
     if not config.SETTINGS_FILE.exists():
@@ -57,59 +58,47 @@ def _load_settings():
         return defaults
 
 
-def save_setting(key: str, value: str):
+def save_setting(key: str, value: str) -> None:
     """Saves a single setting to the JSON file after type conversion."""
-    if key not in _get_default_settings():
+    default_settings = _get_default_settings()
+    if key not in default_settings:
         print(f"{utils.SYSTEM_MSG}--> Unknown setting: '{key}'.{utils.RESET_COLOR}")
         return
 
     current_settings = _load_settings()
+    original_type = type(default_settings.get(key))
+    converted_value: Any = value
 
-    # Attempt to convert value to a more appropriate type
-    original_type = type(_get_default_settings().get(key))
-    converted_value = value
-
-    if original_type == bool:
-        if value.lower() in ["true", "yes", "1"]:
-            converted_value = True
-        elif value.lower() in ["false", "no", "0"]:
-            converted_value = False
-        else:
-            print(
-                f"{utils.SYSTEM_MSG}--> Invalid boolean value: {value}. Use true/false.{utils.RESET_COLOR}"
-            )
-            return
-    elif original_type == int:
-        try:
+    try:
+        if original_type == bool:
+            if value.lower() in ["true", "yes", "1"]:
+                converted_value = True
+            elif value.lower() in ["false", "no", "0"]:
+                converted_value = False
+            else:
+                raise ValueError("Invalid boolean value. Use true/false.")
+        elif original_type == int:
             converted_value = int(value)
-        except ValueError:
-            print(
-                f"{utils.SYSTEM_MSG}--> Invalid integer value: {value}.{utils.RESET_COLOR}"
-            )
-            return
+    except ValueError as e:
+        print(f"{utils.SYSTEM_MSG}--> Error: {e}{utils.RESET_COLOR}")
+        return
 
     current_settings[key] = converted_value
 
-    # Prune any settings that are no longer in the defaults
-    default_keys = _get_default_settings().keys()
     user_settings_to_save = {
-        k: v
-        for k, v in current_settings.items()
-        if k in default_keys and k != "version"
+        k: v for k, v in current_settings.items() if k in default_settings
     }
 
     try:
-        # Ensure the parent directory exists before writing
         utils.ensure_dir_exists(config.CONFIG_DIR)
         with open(config.SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(user_settings_to_save, f, indent=2)
         print(
             f"{utils.SYSTEM_MSG}--> Setting '{key}' updated to '{converted_value}'.{utils.RESET_COLOR}"
         )
-        # Update runtime settings object as well
         settings[key] = converted_value
     except OSError as e:
         log.error("Failed to save settings: %s", e)
 
 
-settings = _load_settings()
+settings: dict[str, Any] = _load_settings()
