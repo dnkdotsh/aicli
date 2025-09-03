@@ -149,13 +149,9 @@ def handle_image_generation(prompt: str | None, args: argparse.Namespace) -> Non
         return
 
     print(f"Generating image with {model} for prompt: '{prompt}'...")
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "n": 1,
-        "size": "1024x1024",
-        "response_format": "b64_json",
-    }
+    payload = {"model": model, "prompt": prompt, "n": 1, "size": "1024x1024"}
+    if model.startswith("dall-e"):
+        payload["response_format"] = "b64_json"
     url, headers = (
         "https://api.openai.com/v1/images/generations",
         {"Authorization": f"Bearer {api_key}"},

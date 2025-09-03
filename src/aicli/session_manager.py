@@ -20,6 +20,7 @@ from __future__ import annotations
 import datetime
 import json
 import queue
+import re
 import sys
 import threading
 from dataclasses import asdict, dataclass, field, fields
@@ -969,9 +970,8 @@ class MultiChatManager:
                 session_raw_logs=srl_list,
             )
             print()
-            cleaned = utils.clean_ai_response_text(engine.name, raw_response)
-            asst_msg_text = f"[{engine.name.capitalize()}]: {cleaned}"
-            asst_msg = utils.construct_assistant_message("openai", asst_msg_text)
+            cleaned_response = utils.clean_ai_response_text(engine.name, raw_response)
+            asst_msg = utils.construct_assistant_message("openai", cleaned_response)
             self.state.shared_history.extend(
                 [utils.construct_user_message("openai", user_msg_text, []), asst_msg]
             )
@@ -1031,12 +1031,9 @@ class MultiChatManager:
             primary_cleaned = utils.clean_ai_response_text(
                 primary_engine.name, primary_raw
             )
-            primary_msg = utils.construct_assistant_message(
-                "openai", f"[{primary_engine.name.capitalize()}]: {primary_cleaned}"
-            )
+            primary_msg = utils.construct_assistant_message("openai", primary_cleaned)
             secondary_msg = utils.construct_assistant_message(
-                "openai",
-                f"[{secondary_result['engine_name'].capitalize()}]: {secondary_result['text']}",
+                "openai", secondary_result["text"]
             )
 
             first, second = (
@@ -1050,8 +1047,32 @@ class MultiChatManager:
     def _log_multichat_turn(
         self, log_filepath: Path, history_slice: list[dict]
     ) -> None:
+        log_slice_copy = [dict(msg) for msg in history_slice]
+        user_msg = log_slice_copy[0]
+        user_text = utils.extract_text_from_message(user_msg)
+
+        if len(log_slice_copy) == 2:  # Targeted prompt
+            match = re.search(r"Director to (\w+):", user_text, re.IGNORECASE)
+            if match:
+                target_engine = match.group(1).lower()
+                asst_msg = log_slice_copy[1]
+                asst_text = utils.extract_text_from_message(asst_msg)
+                labeled_text = f"[{target_engine.capitalize()}]: {asst_text}"
+                asst_msg["content"] = labeled_text
+
+        elif len(log_slice_copy) == 3:  # "All" prompt
+            openai_msg, gemini_msg = (
+                (log_slice_copy[1], log_slice_copy[2])
+                if self.primary_engine_name == "openai"
+                else (log_slice_copy[2], log_slice_copy[1])
+            )
+            openai_text = utils.extract_text_from_message(openai_msg)
+            gemini_text = utils.extract_text_from_message(gemini_msg)
+            openai_msg["content"] = f"[Openai]: {openai_text}"
+            gemini_msg["content"] = f"[Gemini]: {gemini_text}"
+
         try:
             with open(log_filepath, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"history_slice": history_slice}) + "\n")
+                f.write(json.dumps({"history_slice": log_slice_copy}) + "\n")
         except OSError as e:
             log.warning("Could not write to multi-chat session log file: %s", e)
