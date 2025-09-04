@@ -187,12 +187,9 @@ def _perform_image_generation(
 
     # Handle different response formats. DALL-E provides 'b64_json'.
     # Other models might provide a direct URL or other formats.
-    b64_data = (
-        response_data.get("data", [{}])[0].get("b64_json") if response_data else None
-    )
-    # Add handling for other potential response formats here if needed
-    # elif response_data['data'][0].get('url'):
-    #     ...
+    b64_data = None
+    if response_data and "data" in response_data and response_data["data"]:
+        b64_data = response_data["data"][0].get("b64_json")
 
     if not b64_data:
         print("Error: API response did not contain image data.", file=sys.stderr)
@@ -224,15 +221,7 @@ def generate_image_from_session(session: "SessionManager", prompt: str) -> bool:
     Returns:
         A boolean indicating whether the generation was successful.
     """
-    if session.state.engine.name != "openai":
-        print(
-            f"{utils.SYSTEM_MSG}--> Switching to OpenAI for image generation...{utils.RESET_COLOR}"
-        )
-        original_engine = session.state.engine.name
-        session.switch_engine("openai")
-    else:
-        original_engine = None
-
+    # The session manager now handles engine switching, so we just get the model.
     current_model = session.state.model
     if current_model and (
         "dall-e" in current_model.lower() or "image" in current_model.lower()
@@ -268,12 +257,6 @@ def generate_image_from_session(session: "SessionManager", prompt: str) -> bool:
             session.state.engine.name, asst_msg_text
         )
         session.state.history.extend([user_msg, asst_msg])
-
-        if original_engine and original_engine != "openai":
-            print(
-                f"\n{utils.SYSTEM_MSG}--> Switch back to {original_engine.capitalize()}? "
-                f"(Type '/engine {original_engine}'){utils.RESET_COLOR}"
-            )
         return True
 
     return False

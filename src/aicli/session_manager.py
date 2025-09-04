@@ -69,6 +69,9 @@ class SessionState:
     img_prompt: str | None = None
     last_img_prompt: str | None = None
     img_prompt_crafting: bool = False
+    # State for reverting engine/model after image generation
+    pre_image_engine: str | None = None
+    pre_image_model: str | None = None
 
 
 class SessionManager:
@@ -687,8 +690,10 @@ class SessionManager:
         # Automatically switch to OpenAI if not already using it.
         if self.state.engine.name != "openai":
             print(
-                f"{utils.SYSTEM_MSG}--> Image generation requires OpenAI. Switching engine...{utils.RESET_COLOR}"
+                f"{utils.SYSTEM_MSG}--> Image generation requires OpenAI. Temporarily switching engine...{utils.RESET_COLOR}"
             )
+            self.state.pre_image_engine = self.state.engine.name
+            self.state.pre_image_model = self.state.model
             self.switch_engine("openai")
 
         send_immediately = "--send-prompt" in args
@@ -792,6 +797,7 @@ class SessionManager:
             self.state.img_prompt_crafting = False
             self.state.img_prompt = None
             print(f"{utils.SYSTEM_MSG}--> Image crafting cancelled.{utils.RESET_COLOR}")
+            self._revert_engine_after_image_crafting()
             return False, None
 
         token_limit = app_settings.settings["image_prompt_refinement_max_tokens"]
@@ -829,12 +835,28 @@ class SessionManager:
             f"\n{utils.SYSTEM_MSG}--> Initiating image generation...{utils.RESET_COLOR}"
         )
 
-        # Update state before the potentially long-running generation task
         self.state.last_img_prompt = prompt
         self.state.img_prompt = None
         self.state.img_prompt_crafting = False
 
-        return handlers.generate_image_from_session(self, prompt)
+        success = handlers.generate_image_from_session(self, prompt)
+        self._revert_engine_after_image_crafting()
+        return success
+
+    def _revert_engine_after_image_crafting(self) -> None:
+        """Reverts to the original engine and model after an image workflow."""
+        if self.state.pre_image_engine and self.state.pre_image_model:
+            print(
+                f"\n{utils.SYSTEM_MSG}--> Reverting to original session engine ({self.state.pre_image_engine})...{utils.RESET_COLOR}"
+            )
+            original_engine = self.state.pre_image_engine
+            original_model = self.state.pre_image_model
+
+            self.state.pre_image_engine = None
+            self.state.pre_image_model = None
+
+            self.switch_engine(original_engine)
+            self.set_model(original_model)
 
     def _get_history_for_helpers(self) -> str:
         return "\n".join(
@@ -969,10 +991,6 @@ class SingleChatManager:
 
     def _log_turn(self, log_filepath: Path) -> None:
         try:
-            # This check is now implicitly handled by the return value of take_turn,
-            # but an extra layer of safety doesn't hurt.
-            if self.session.state.img_prompt_crafting:
-                return
             last_turn = self.session.state.history[-2:]
             log_entry = {
                 "timestamp": datetime.datetime.now().isoformat(),
