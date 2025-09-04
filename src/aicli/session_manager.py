@@ -215,13 +215,16 @@ class SessionManager:
             )
         print(utils.format_token_string(tokens))
 
-    def take_turn(self, user_input: str, first_turn: bool) -> None:
-        """Handles user input for both normal chat and image prompt crafting."""
+    def take_turn(self, user_input: str, first_turn: bool) -> bool:
+        """
+        Handles user input. Returns True if a conversational turn occurred
+        that should be logged, False otherwise.
+        """
         if self.state.img_prompt_crafting:
             should_generate, final_prompt = self._process_image_prompt_input(user_input)
             if should_generate and final_prompt:
                 self.generate_image(final_prompt)
-            return
+            return False  # Image crafting is not a standard conversational turn
 
         user_msg = utils.construct_user_message(
             self.state.engine.name,
@@ -260,6 +263,8 @@ class SessionManager:
 
         if len(self.state.history) >= config.HISTORY_SUMMARY_THRESHOLD_TURNS * 2:
             self._condense_chat_history()
+
+        return True  # A standard conversational turn occurred
 
     def cleanup(self, session_name: str | None, log_filepath: Path) -> None:
         if (
@@ -678,10 +683,14 @@ class SessionManager:
     def handle_image_command(self, args: list[str]) -> None:
         """
         Manages image generation workflows with intelligent state-based routing.
-
-        This method acts as a sophisticated dispatcher that examines the current
-        session state and user intent to determine the appropriate action.
         """
+        # Automatically switch to OpenAI if not already using it.
+        if self.state.engine.name != "openai":
+            print(
+                f"{utils.SYSTEM_MSG}--> Image generation requires OpenAI. Switching engine...{utils.RESET_COLOR}"
+            )
+            self.switch_engine("openai")
+
         send_immediately = "--send-prompt" in args
         if send_immediately:
             args = [arg for arg in args if arg != "--send-prompt"]
@@ -735,6 +744,7 @@ class SessionManager:
     def start_image_prompt_crafting(self, initial_prompt: str | None = None) -> None:
         """Transitions the session into image prompt crafting mode."""
         self.state.img_prompt_crafting = True
+        token_limit = app_settings.settings["image_prompt_refinement_max_tokens"]
 
         if initial_prompt:
             refinement_request = (
@@ -742,7 +752,9 @@ class SessionManager:
                 "Provide a gently refined version that keeps their core idea intact, adds helpful visual "
                 "details, and is concise. Respond with only the refined prompt."
             )
-            refined_prompt, _ = self._perform_helper_request(refinement_request, 150)
+            refined_prompt, _ = self._perform_helper_request(
+                refinement_request, token_limit
+            )
 
             if refined_prompt and not refined_prompt.startswith("API Error:"):
                 self.state.img_prompt = refined_prompt.strip()
@@ -782,12 +794,15 @@ class SessionManager:
             print(f"{utils.SYSTEM_MSG}--> Image crafting cancelled.{utils.RESET_COLOR}")
             return False, None
 
+        token_limit = app_settings.settings["image_prompt_refinement_max_tokens"]
         refinement_request = (
             f"Current prompt: '{self.state.img_prompt}'\n\n"
             f"User refinement: '{user_input}'\n\n"
             "Incorporate the user's feedback into an updated prompt. Respond with only the updated prompt."
         )
-        refined_prompt, _ = self._perform_helper_request(refinement_request, 150)
+        refined_prompt, _ = self._perform_helper_request(
+            refinement_request, token_limit
+        )
 
         if refined_prompt and not refined_prompt.startswith("API Error:"):
             self.state.img_prompt = refined_prompt.strip()
@@ -924,8 +939,11 @@ class SingleChatManager:
                     if self._handle_slash_command(user_input, cli_history):
                         break
                     continue
-                self.session.take_turn(user_input, first_turn)
-                self._log_turn(log_filepath)
+
+                # Only log the turn if it was a conversational one
+                if self.session.take_turn(user_input, first_turn):
+                    self._log_turn(log_filepath)
+
                 first_turn = False
         except (KeyboardInterrupt, EOFError):
             print("\nSession interrupted by user.")
@@ -950,10 +968,11 @@ class SingleChatManager:
         return False
 
     def _log_turn(self, log_filepath: Path) -> None:
-        # Don't log turns related to image prompt crafting
-        if self.session.state.img_prompt_crafting:
-            return
         try:
+            # This check is now implicitly handled by the return value of take_turn,
+            # but an extra layer of safety doesn't hurt.
+            if self.session.state.img_prompt_crafting:
+                return
             last_turn = self.session.state.history[-2:]
             log_entry = {
                 "timestamp": datetime.datetime.now().isoformat(),
