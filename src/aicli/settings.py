@@ -51,6 +51,7 @@ def _get_default_settings() -> dict[str, Any]:
         "default_max_tokens": 4096,
         "summary_max_tokens": 4096,
         "log_rename_max_tokens": 2048,
+        "image_prompt_max_tokens": 2048,
     }
 
 

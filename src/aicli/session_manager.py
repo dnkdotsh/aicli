@@ -716,7 +716,9 @@ class SessionManager:
 
             refined_prompt, _ = self._perform_helper_request(
                 refinement_request,
-                150,  # Token limit for the refinement
+                app_settings.settings[
+                    "image_prompt_max_tokens"
+                ],  # Token limit for the refinement
             )
 
             if refined_prompt and not refined_prompt.startswith("API Error:"):
@@ -798,7 +800,9 @@ class SessionManager:
                 "Respond with only the prompt."
             )
 
-        refined_prompt, _ = self._perform_helper_request(refinement_request, 150)
+        refined_prompt, _ = self._perform_helper_request(
+            refinement_request, ["image_prompt_max_tokens"]
+        )
 
         if refined_prompt and not refined_prompt.startswith("API Error:"):
             self.state.img_prompt = refined_prompt.strip()
