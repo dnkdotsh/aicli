@@ -106,6 +106,4 @@ Random mix of bugs to fix, features I want, and crazy ideas I might try.
 • Blockchain something something
   - Just kidding, but maybe conversation provenance?
 
----
-
 *Half of this will never happen, but hey, gotta dream big.*
