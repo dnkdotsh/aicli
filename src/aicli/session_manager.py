@@ -30,17 +30,13 @@ from prompt_toolkit import prompt
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.history import InMemoryHistory
 
-from . import api_client, commands, config, utils
+from . import api_client, commands, config, prompts, utils
 from . import personas as persona_manager
 from . import settings as app_settings
 from .engine import AIEngine, get_engine
 from .logger import log
 from .prompts import (
     CONTINUATION_PROMPT,
-    DIRECT_MEMORY_INJECTION_PROMPT,
-    HISTORY_SUMMARY_PROMPT,
-    LOG_RENAMING_PROMPT,
-    MEMORY_INTEGRATION_PROMPT,
 )
 
 
@@ -154,7 +150,7 @@ class SessionManager:
             f"{msg.get('role', 'unknown')}: {utils.extract_text_from_message(msg)}"
             for msg in turns_to_summarize
         )
-        summary_prompt = HISTORY_SUMMARY_PROMPT.format(log_content=log_content)
+        summary_prompt = prompts.HISTORY_SUMMARY_PROMPT.format(log_content=log_content)
         summary_text, _ = self._perform_helper_request(
             summary_prompt, app_settings.settings["summary_max_tokens"]
         )
@@ -338,7 +334,7 @@ class SessionManager:
         print(
             f"{utils.SYSTEM_MSG}--> Injecting fact into persistent memory...{utils.RESET_COLOR}"
         )
-        prompt_text = DIRECT_MEMORY_INJECTION_PROMPT.format(
+        prompt_text = prompts.DIRECT_MEMORY_INJECTION_PROMPT.format(
             existing_ltm=self._read_memory_file(), new_fact=fact
         )
         updated_memory, _ = self._perform_helper_request(prompt_text, None)
@@ -364,7 +360,7 @@ class SessionManager:
         print(
             f"{utils.SYSTEM_MSG}--> Updating persistent memory with session content...{utils.RESET_COLOR}"
         )
-        prompt_text = MEMORY_INTEGRATION_PROMPT.format(
+        prompt_text = prompts.MEMORY_INTEGRATION_PROMPT.format(
             existing_ltm=self._read_memory_file(),
             session_content=self._get_history_for_helpers(),
         )
@@ -452,7 +448,9 @@ class SessionManager:
                 f"{utils.SYSTEM_MSG}--> Generating descriptive name...{utils.RESET_COLOR}"
             )
             filename, _ = self._perform_helper_request(
-                LOG_RENAMING_PROMPT.format(log_content=self._get_history_for_helpers()),
+                prompts.LOG_RENAMING_PROMPT.format(
+                    log_content=self._get_history_for_helpers()
+                ),
                 50,
             )
             if not filename:
@@ -752,10 +750,8 @@ class SessionManager:
         token_limit = app_settings.settings["image_prompt_refinement_max_tokens"]
 
         if initial_prompt:
-            refinement_request = (
-                f"The user wants to generate an image with this description: '{initial_prompt}'\n\n"
-                "Provide a gently refined version that keeps their core idea intact, adds helpful visual "
-                "details, and is concise. Respond with only the refined prompt."
+            refinement_request = prompts.IMAGE_PROMPT_INITIAL_REFINEMENT.format(
+                initial_prompt=initial_prompt
             )
             refined_prompt, _ = self._perform_helper_request(
                 refinement_request, token_limit
@@ -801,10 +797,8 @@ class SessionManager:
             return False, None
 
         token_limit = app_settings.settings["image_prompt_refinement_max_tokens"]
-        refinement_request = (
-            f"Current prompt: '{self.state.img_prompt}'\n\n"
-            f"User refinement: '{user_input}'\n\n"
-            "Incorporate the user's feedback into an updated prompt. Respond with only the updated prompt."
+        refinement_request = prompts.IMAGE_PROMPT_SUBSEQUENT_REFINEMENT.format(
+            current_prompt=self.state.img_prompt, user_input=user_input
         )
         refined_prompt, _ = self._perform_helper_request(
             refinement_request, token_limit
@@ -904,7 +898,7 @@ class SessionManager:
         print(
             f"{utils.SYSTEM_MSG}--> Generating descriptive name for session log...{utils.RESET_COLOR}"
         )
-        prompt_text = LOG_RENAMING_PROMPT.format(
+        prompt_text = prompts.LOG_RENAMING_PROMPT.format(
             log_content=self._get_history_for_helpers()
         )
         suggested_name, _ = self._perform_helper_request(
