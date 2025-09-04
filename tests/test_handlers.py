@@ -168,8 +168,12 @@ class TestHandleImageGeneration:
         mocker.patch("aicli.handlers.get_engine")
         mocker.patch("aicli.handlers.utils.select_model", return_value="dall-e-3")
 
-    def test_image_generation_success(self, mocker, fake_fs):
+    def test_image_generation_success(self, mocker, tmp_path):
         """Tests the successful image generation and saving logic."""
+        # Point the config to a temporary directory for this test
+        mocker.patch("aicli.config.IMAGE_DIRECTORY", tmp_path)
+        mocker.patch("aicli.config.IMAGE_LOG_FILE", tmp_path / "image_log.jsonl")
+
         mock_make_request = mocker.patch("aicli.api_client.make_api_request")
         fake_image_bytes = b"fake_png_data"
         b64_data = base64.b64encode(fake_image_bytes).decode("utf-8")
@@ -178,21 +182,31 @@ class TestHandleImageGeneration:
         args = create_mock_args()
         prompt = "A test image"
 
+        # We need to mock sys.exit to prevent the test runner from stopping
+        mocker.patch("sys.exit")
+
         handlers.handle_image_generation(prompt, args)
 
-        saved_files = list(config.IMAGE_DIRECTORY.glob("*.png"))
+        saved_files = list(tmp_path.glob("*.png"))
         assert len(saved_files) == 1
         with open(saved_files[0], "rb") as f:
             assert f.read() == fake_image_bytes
 
     def test_image_generation_api_error(self, mocker, capsys):
-        """Tests graceful failure when the API returns an error."""
+        """Tests that a graceful exit occurs when the API returns an error."""
         mocker.patch(
             "aicli.api_client.make_api_request",
             side_effect=api_client.ApiRequestError("API failed"),
         )
         args = create_mock_args()
         prompt = "A test image"
-        handlers.handle_image_generation(prompt, args)
+
+        # Assert that the function correctly calls sys.exit(1) upon failure
+        with pytest.raises(SystemExit) as excinfo:
+            handlers.handle_image_generation(prompt, args)
+
+        assert excinfo.value.code == 1
+
+        # Verify that the correct error message was printed to stderr
         captured = capsys.readouterr()
         assert "Error: API failed" in captured.err

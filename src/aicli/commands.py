@@ -1,4 +1,4 @@
-# src/aicli/commands.py
+# aicli/commands.py
 # aicli: A command-line interface for interacting with AI models.
 # Copyright (C) 2025 Dank A. Saurus
 
@@ -169,6 +169,18 @@ def handle_persona(args: list[str], session: SessionManager) -> None:
         )
         return
     session.switch_persona(" ".join(args))
+
+
+def handle_image(args: list[str], session: SessionManager) -> None:
+    """
+    Handles all image generation workflows by delegating to the SessionManager.
+
+    This function acts as a simple dispatcher. It passes the user's arguments
+    directly to the session manager, which contains the complex state and
+    workflow logic. This keeps the command map clean and adheres to our
+    architectural principle of centralizing state management in the session.
+    """
+    session.handle_image_command(args)
 
 
 # --- Multi-Chat Command Handler Functions ---
@@ -364,6 +376,7 @@ COMMAND_MAP = {
     "/detach": handle_detach,
     "/personas": handle_personas,
     "/persona": handle_persona,
+    "/image": handle_image,
 }
 
 MULTICHAT_COMMAND_MAP = {

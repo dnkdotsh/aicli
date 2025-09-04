@@ -6,7 +6,6 @@
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY;
 # without even the implied warranty of
@@ -62,6 +61,19 @@ LOG_RENAMING_PROMPT = (
 CONTINUATION_PROMPT = (
     "Please continue the conversation based on the history provided. "
     "Offer a new insight, ask a follow-up question, or rebut the last point made."
+)
+
+# Prompts for the image crafting workflow in SessionManager
+IMAGE_PROMPT_INITIAL_REFINEMENT = (
+    "The user wants to generate an image with this description: '{initial_prompt}'\n\n"
+    "Provide a gently refined version that keeps their core idea intact, adds helpful visual "
+    "details, and is concise. Respond with only the refined prompt."
+)
+
+IMAGE_PROMPT_SUBSEQUENT_REFINEMENT = (
+    "Current prompt: '{current_prompt}'\n\n"
+    "User refinement: '{user_input}'\n\n"
+    "Incorporate the user's feedback into an updated prompt. Respond with only the updated prompt."
 )
 
 
