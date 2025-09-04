@@ -17,6 +17,8 @@
 
 
 import base64
+import datetime
+import json
 import mimetypes
 import os
 import re
@@ -446,8 +448,8 @@ Interactive Chat Commands:
   /model [name]     Select a new model for the current engine.
   /persona <name>   Switch to a different persona. Use `/persona clear` to remove.
   /personas         List all available personas.
+  /image [prompt]   Initiate the image generation workflow.
   /set [key] [val]  Change a setting (e.g., /set stream false).
-                    Run without arguments to list all settings.
   /max-tokens [num] Set max tokens for the session.
 """
     elif context == "multichat":
@@ -458,8 +460,7 @@ Multi-Chat Commands:
   /help                     Display this help message.
   /history                  Print the JSON of the shared conversation history.
   /debug                    Toggle session-specific raw API logging.
-  /memory                   View the content of the persistent memory file.
-  /remember [text]          If text, inject into memory. If no text, consolidate chat.
+  /remember                 Consolidates current chat into memory.
   /clear                    Clear the current conversation history.
   /state                    Print the current session state.
   /save <name> [--stay] [--remember]
@@ -467,7 +468,6 @@ Multi-Chat Commands:
                             --stay:      Do not exit after saving.
                             --remember:  Update persistent memory before saving.
   /model <gpt|gem> <name>   Change the model for the specified engine.
-  /set [key] [val]          Change a global setting.
   /max-tokens <num>         Set max output tokens for the session.
   /ai <gpt|gem> [prompt]    Send a targeted prompt to only one AI.
                             If no prompt, the AI is asked to continue.
@@ -548,3 +548,54 @@ def resolve_config_precedence(args: "argparse.Namespace") -> dict[str, Any]:
         "files_arg": args.file,
         "exclude_arg": args.exclude,
     }
+
+
+def save_image_and_get_path(
+    prompt: str, image_bytes: bytes, session_name: str | None
+) -> Path:
+    """
+    Saves image bytes to a uniquely named file and returns the path.
+
+    Args:
+        prompt: The image prompt, used for generating a descriptive filename.
+        image_bytes: The raw bytes of the image to be saved.
+        session_name: An optional session identifier for file organization.
+
+    Returns:
+        The Path object of the newly created image file.
+    """
+    safe_prompt = sanitize_filename(prompt[:50])
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    if session_name:
+        base_filename = f"session_{session_name}_img_{safe_prompt}_{timestamp}.png"
+    else:
+        base_filename = f"image_{safe_prompt}_{timestamp}.png"
+    filepath = config.IMAGE_DIRECTORY / base_filename
+    filepath.write_bytes(image_bytes)
+    return filepath
+
+
+def log_image_generation(
+    model: str, prompt: str, filepath: str, session_name: str | None
+) -> None:
+    """
+    Writes a record of a successful image generation to the image log file.
+
+    Args:
+        model: The model used for generation.
+        prompt: The full prompt used.
+        filepath: The path where the final image was saved.
+        session_name: The optional session identifier.
+    """
+    try:
+        log_entry = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "model": model,
+            "prompt": prompt,
+            "file": filepath,
+            "session": session_name,
+        }
+        with open(config.IMAGE_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(log_entry) + "\n")
+    except OSError as e:
+        log.warning("Could not write to image log file: %s", e)
