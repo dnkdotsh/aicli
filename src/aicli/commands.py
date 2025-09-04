@@ -171,6 +171,208 @@ def handle_persona(args: list[str], session: SessionManager) -> None:
     session.switch_persona(" ".join(args))
 
 
+def handle_image(args: list[str], session: SessionManager) -> None:
+    """
+    Manages image generation workflows with intelligent state-based routing.
+
+    This command acts as a sophisticated dispatcher that examines the current
+    session state and user intent to determine the appropriate image generation
+    workflow. It's designed to feel intuitive - users don't need to remember
+    multiple commands, just /image and optional arguments.
+
+    Think of this command as having multiple "personalities" that activate based
+    on context. Sometimes it's a creative assistant helping you craft the perfect
+    prompt. Sometimes it's a quick executor that generates immediately. And
+    sometimes it's a helpful guide offering to refine previous work.
+
+    Supported workflows:
+    1. Fresh start: /image (with no existing prompt)
+    2. Initial prompt: /image a beautiful sunset over mountains
+    3. Previous prompt refinement: /image (when last_img_prompt exists)
+    4. Immediate generation: /image --send-prompt
+
+    The command maintains a careful balance between being helpful and not being
+    intrusive. It provides clear feedback about what's happening and what options
+    are available, making the image generation process feel conversational rather
+    than transactional.
+    """
+
+    # First, let's check for the special immediate generation flag
+    # This flag takes priority over all other logic because it represents
+    # an explicit user intent to generate NOW. It's like pressing the
+    # "express checkout" button - skip all the browsing and just complete the purchase
+    send_immediately = "--send-prompt" in args
+
+    # Remove the flag from args so we can process the rest normally
+    # This cleanup is important because the remaining args might contain the prompt text
+    # We're essentially separating the "how" (the flag) from the "what" (the prompt)
+    if send_immediately:
+        args = [arg for arg in args if arg != "--send-prompt"]
+
+    # Now we need to understand what prompt material we're working with
+    # There are three possible sources, like three different drafts on your desk:
+    # 1. New text the user just typed (args)
+    # 2. A prompt we've been crafting together (current_prompt)
+    # 3. Something we generated before (previous_prompt)
+    prompt_from_args = " ".join(args) if args else None
+    current_prompt = session.state.img_prompt
+    previous_prompt = session.state.last_img_prompt
+
+    # Check if we're already in crafting mode
+    # This is a safety check - normally users wouldn't use /image while already crafting,
+    # but we handle it gracefully. It's like someone asking to start a conversation
+    # when you're already talking to them
+    if session.state.img_prompt_crafting:
+        print(
+            f"{utils.SYSTEM_MSG}--> You're already in image crafting mode. "
+            f"Continue refining your prompt or type 'yes' to generate.{utils.RESET_COLOR}"
+        )
+        return
+
+    # Now let's handle the immediate generation workflow
+    # This is for users who know exactly what they want and don't need our help
+    # It's the "I've got this" path through the command
+    if send_immediately:
+        # Determine which prompt to use for immediate generation
+        # We have a clear priority order here, like choosing which draft to submit:
+        # First choice: new prompt from args (freshest input)
+        # Second choice: current crafted prompt (what we've been working on)
+        # Third choice: previous prompt (what worked before)
+        prompt_to_generate = None
+
+        if prompt_from_args:
+            # User provided a fresh prompt with the command
+            prompt_to_generate = prompt_from_args
+            print(
+                f"{utils.SYSTEM_MSG}--> Generating image immediately with: "
+                f"{prompt_from_args[:50]}{'...' if len(prompt_from_args) > 50 else ''}"
+                f"{utils.RESET_COLOR}"
+            )
+        elif current_prompt:
+            # We have a prompt we've been crafting
+            prompt_to_generate = current_prompt
+            print(
+                f"{utils.SYSTEM_MSG}--> Generating with current prompt: "
+                f"{current_prompt[:50]}{'...' if len(current_prompt) > 50 else ''}"
+                f"{utils.RESET_COLOR}"
+            )
+        elif previous_prompt:
+            # Fall back to the last successful prompt
+            prompt_to_generate = previous_prompt
+            print(
+                f"{utils.SYSTEM_MSG}--> Regenerating previous image: "
+                f"{previous_prompt[:50]}{'...' if len(previous_prompt) > 50 else ''}"
+                f"{utils.RESET_COLOR}"
+            )
+        else:
+            # No prompt available anywhere - we need something to work with!
+            print(
+                f"{utils.SYSTEM_MSG}--> No prompt available for generation. "
+                f"Use '/image <description>' to start crafting.{utils.RESET_COLOR}"
+            )
+            return
+
+        # Perform the actual generation using the session's method
+        # This delegates to the SessionManager which knows how to coordinate
+        # with the handlers module for the actual API calls
+        session.generate_image(prompt_to_generate)
+        return
+
+    # Now let's handle the interactive crafting workflows
+    # These are for users who want help refining their prompts
+    # Think of this section as the "let's work together" paths
+
+    if prompt_from_args:
+        # Workflow 2: User provided an initial prompt
+        # Example: /image a majestic dragon perched on a mountain
+        # They have an idea but might want our help making it better
+        print(
+            f"\n{utils.SYSTEM_MSG}--> Starting image prompt crafting with your idea..."
+            f"{utils.RESET_COLOR}"
+        )
+        session.start_image_prompt_crafting(prompt_from_args)
+
+    elif not current_prompt and not previous_prompt:
+        # Workflow 1: Fresh start - no prompts anywhere
+        # This is for users who want to brainstorm from scratch
+        # It's like starting with a blank canvas and asking "what should we create?"
+        print(
+            f"\n{utils.SYSTEM_MSG}--> Starting fresh image prompt crafting..."
+            f"{utils.RESET_COLOR}"
+        )
+        session.start_image_prompt_crafting()
+
+    elif not current_prompt and previous_prompt:
+        # Workflow 3: Offer to refine the previous prompt
+        # This is helpful when users want to iterate on something they made before
+        # It's like asking "should we try a variation of what we did last time?"
+        print(f"\n{utils.SYSTEM_MSG}Previous image prompt found:{utils.RESET_COLOR}")
+        print(f"  '{previous_prompt}'\n")
+
+        # We present options in a friendly, conversational way
+        # Notice how we offer shortcuts (single letters) for experienced users
+        # but also full words for clarity
+        choice = (
+            input(
+                "Would you like to:\n"
+                "  1. Refine this prompt (enter 'r' or 'refine')\n"
+                "  2. Regenerate as-is (enter 'g' or 'generate')\n"
+                "  3. Start fresh (enter 'n' or 'new')\n"
+                "Choice: "
+            )
+            .lower()
+            .strip()
+        )
+
+        if choice in ["r", "refine", "1"]:
+            # User wants to tweak the previous prompt
+            print(
+                f"\n{utils.SYSTEM_MSG}--> Loading previous prompt for refinement..."
+                f"{utils.RESET_COLOR}"
+            )
+            # Start crafting with the previous prompt as the initial seed
+            # This gives them a starting point to work from
+            session.start_image_prompt_crafting(previous_prompt)
+
+        elif choice in ["g", "generate", "2"]:
+            # User wants the exact same prompt again
+            # Maybe they want a different variation or the last one failed
+            print(
+                f"\n{utils.SYSTEM_MSG}--> Regenerating previous image..."
+                f"{utils.RESET_COLOR}"
+            )
+            # Directly generate without entering crafting mode
+            session.generate_image(previous_prompt)
+
+        elif choice in ["n", "new", "3"]:
+            # User wants to start over with something completely different
+            print(
+                f"\n{utils.SYSTEM_MSG}--> Starting fresh image prompt crafting..."
+                f"{utils.RESET_COLOR}"
+            )
+            session.start_image_prompt_crafting()
+
+        else:
+            # Invalid input - cancel the operation
+            # We don't want to guess what the user meant, so we safely abort
+            print(
+                f"{utils.SYSTEM_MSG}--> Invalid choice. Cancelled.{utils.RESET_COLOR}"
+            )
+
+    elif current_prompt:
+        # Edge case: There's a current prompt but we're not in crafting mode
+        # This might happen if crafting was interrupted somehow
+        # We help the user recover gracefully
+        print(f"\n{utils.SYSTEM_MSG}Current prompt found:{utils.RESET_COLOR}")
+        print(f"  '{current_prompt}'\n")
+        print(
+            f"{utils.SYSTEM_MSG}--> Resuming image crafting mode. "
+            f"Type 'yes' to generate or continue refining.{utils.RESET_COLOR}"
+        )
+        # Re-enable crafting mode so the user can continue where they left off
+        session.state.img_prompt_crafting = True
+
+
 # --- Multi-Chat Command Handler Functions ---
 
 
@@ -364,6 +566,7 @@ COMMAND_MAP = {
     "/detach": handle_detach,
     "/personas": handle_personas,
     "/persona": handle_persona,
+    "/image": handle_image,  # Added image generation command
 }
 
 MULTICHAT_COMMAND_MAP = {

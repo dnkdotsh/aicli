@@ -20,7 +20,6 @@ from __future__ import annotations
 import datetime
 import json
 import queue
-import re
 import sys
 import threading
 from dataclasses import asdict, dataclass, field, fields
@@ -66,6 +65,10 @@ class SessionState:
     exit_without_memory: bool = False
     force_quit: bool = False
     custom_log_rename: str | None = None
+    # New fields for integrated image generation workflow
+    img_prompt: str | None = None  # Current image prompt being crafted
+    last_img_prompt: str | None = None  # Previous prompt for easy regeneration
+    img_prompt_crafting: bool = False  # Flag indicating image crafting mode
 
 
 class SessionManager:
@@ -213,6 +216,26 @@ class SessionManager:
         print(utils.format_token_string(tokens))
 
     def take_turn(self, user_input: str, first_turn: bool) -> None:
+        """Modified to handle both normal chat and image prompt crafting modes."""
+
+        # Check if we're in image crafting mode and route accordingly
+        if self.state.img_prompt_crafting:
+            should_generate, final_prompt = self._process_image_prompt_input(user_input)
+
+            if should_generate and final_prompt:
+                # Store the prompt for potential regeneration
+                self.state.last_img_prompt = final_prompt
+                # Exit crafting mode
+                self.state.img_prompt_crafting = False
+                self.state.img_prompt = None
+
+                # Perform the actual image generation
+                self.generate_image(final_prompt)
+
+            # Don't process as normal conversation when in crafting mode
+            return
+
+        # Original take_turn implementation for normal conversation
         user_msg = utils.construct_user_message(
             self.state.engine.name,
             user_input,
@@ -418,6 +441,13 @@ class SessionManager:
             )
         if self.state.attached_images:
             print(f"  Attached Images: {len(self.state.attached_images)}")
+        # Add image generation state information
+        if self.state.img_prompt_crafting:
+            print("  Image Crafting: ACTIVE")
+            if self.state.img_prompt:
+                print(f"  Current Prompt: {self.state.img_prompt[:50]}...")
+        if self.state.last_img_prompt:
+            print(f"  Last Image Prompt: {self.state.last_img_prompt[:50]}...")
 
     def save(self, args: list[str], command_history: list[str]) -> bool:
         should_remember, should_stay = "--remember" in args, "--stay" in args
@@ -659,6 +689,189 @@ class SessionManager:
                 [],
             )
         )
+
+    def start_image_prompt_crafting(self, initial_prompt: str | None = None) -> None:
+        """
+        Transitions the session into image prompt crafting mode.
+
+        When an initial prompt is provided, we use the AI to provide gentle
+        refinement suggestions while respecting the user's original intent.
+        This creates a collaborative experience where the AI acts as a
+        creative assistant rather than taking over the prompt entirely.
+        """
+        self.state.img_prompt_crafting = True
+
+        if initial_prompt:
+            # We'll ask the AI for minimal, respectful refinement
+            # The key here is to enhance without dramatically altering
+            refinement_request = (
+                f"The user wants to generate an image with this description: '{initial_prompt}'\n\n"
+                "Please provide a gently refined version that:\n"
+                "1. Keeps their core idea intact\n"
+                "2. Adds helpful visual details if missing (lighting, style, mood)\n"
+                "3. Maintains their original tone and intent\n"
+                "4. Is concise (under 100 words)\n\n"
+                "Respond with only the refined prompt, no explanation."
+            )
+
+            refined_prompt, _ = self._perform_helper_request(
+                refinement_request,
+                150,  # Token limit for the refinement
+            )
+
+            if refined_prompt and not refined_prompt.startswith("API Error:"):
+                self.state.img_prompt = refined_prompt.strip()
+                print(
+                    f"\n{utils.ASSISTANT_PROMPT}Image Assistant: "
+                    f"{utils.RESET_COLOR}Here's a refined version of your prompt:\n\n"
+                    f"{refined_prompt.strip()}\n\n"
+                    "Type 'yes' to generate, 'no' to cancel, or provide changes."
+                )
+            else:
+                # Fallback to the original if refinement fails
+                self.state.img_prompt = initial_prompt
+                print(
+                    f"\n{utils.ASSISTANT_PROMPT}Image Assistant: "
+                    f"{utils.RESET_COLOR}Ready to generate: {initial_prompt}\n"
+                    "Type 'yes' to generate, 'no' to cancel, or provide changes."
+                )
+        else:
+            # No initial prompt, so we start with a clean slate
+            self.state.img_prompt = ""
+            print(
+                f"\n{utils.ASSISTANT_PROMPT}Image Assistant: "
+                f"{utils.RESET_COLOR}Let's craft an image prompt together. "
+                "Describe what you'd like to see, and I'll help refine it."
+            )
+
+    def _process_image_prompt_input(self, user_input: str) -> tuple[bool, str | None]:
+        """
+        Handles user input when in image prompt crafting mode.
+
+        Returns a tuple of (should_generate, final_prompt).
+        This method interprets user commands and either refines the prompt,
+        triggers generation, or exits crafting mode.
+        """
+        normalized_input = user_input.strip().lower()
+
+        # Check for generation triggers
+        if normalized_input in ["yes", "y", "generate", "send", "go", "create"]:
+            if self.state.img_prompt:
+                # User is ready to generate with the current prompt
+                return True, self.state.img_prompt
+            else:
+                print(
+                    f"{utils.SYSTEM_MSG}--> No image prompt to generate. "
+                    f"Please describe what you'd like to see.{utils.RESET_COLOR}"
+                )
+                return False, None
+
+        # Check for cancellation
+        if normalized_input in ["no", "n", "cancel", "stop", "exit"]:
+            self.state.img_prompt_crafting = False
+            self.state.img_prompt = None
+            print(
+                f"{utils.SYSTEM_MSG}--> Image crafting cancelled. "
+                f"Returning to normal conversation.{utils.RESET_COLOR}"
+            )
+            return False, None
+
+        # Otherwise, treat input as prompt refinement request
+        if self.state.img_prompt:
+            # We have an existing prompt to refine
+            refinement_request = (
+                f"Current image prompt: '{self.state.img_prompt}'\n\n"
+                f"User refinement request: '{user_input}'\n\n"
+                "Please create an updated image prompt that incorporates the user's feedback. "
+                "Keep it visual, specific, and under 100 words. "
+                "Respond with only the updated prompt."
+            )
+        else:
+            # This is the initial prompt from the user
+            refinement_request = (
+                f"The user wants to create an image of: '{user_input}'\n\n"
+                "Please create a detailed image generation prompt that:\n"
+                "1. Captures their idea clearly\n"
+                "2. Adds helpful visual details (style, lighting, composition)\n"
+                "3. Is specific and descriptive\n"
+                "4. Is under 100 words\n\n"
+                "Respond with only the prompt."
+            )
+
+        refined_prompt, _ = self._perform_helper_request(refinement_request, 150)
+
+        if refined_prompt and not refined_prompt.startswith("API Error:"):
+            self.state.img_prompt = refined_prompt.strip()
+            print(
+                f"\n{utils.ASSISTANT_PROMPT}Image Assistant: "
+                f"{utils.RESET_COLOR}Updated prompt:\n\n{refined_prompt.strip()}\n\n"
+                "Type 'yes' to generate, 'no' to cancel, or provide more changes."
+            )
+        else:
+            # If refinement fails, use the user's input directly
+            self.state.img_prompt = user_input
+            print(
+                f"\n{utils.ASSISTANT_PROMPT}Image Assistant: "
+                f"{utils.RESET_COLOR}Updated to: {user_input}\n"
+                "Type 'yes' to generate, 'no' to cancel, or provide more changes."
+            )
+
+        return False, None
+
+    def generate_image(self, prompt: str | None = None) -> bool:
+        """
+        Coordinates the image generation process from within an active session.
+
+        This method manages all the state transitions that need to happen when
+        generating an image from a conversation. It's like a choreographer making
+        sure all the dancers (state variables) move in sync.
+        """
+        # Determine which prompt to use
+        final_prompt = prompt or self.state.img_prompt or self.state.last_img_prompt
+
+        if not final_prompt:
+            print(
+                f"{utils.SYSTEM_MSG}--> No image prompt available. "
+                f"Use '/image <description>' to start.{utils.RESET_COLOR}"
+            )
+            return False
+
+        # Manage the state transitions
+        # These happen BEFORE generation to ensure clean state even if generation fails
+        if self.state.img_prompt:
+            # Move current to last for potential future regeneration
+            self.state.last_img_prompt = self.state.img_prompt
+            self.state.img_prompt = None
+
+        # Exit crafting mode if we're in it
+        if self.state.img_prompt_crafting:
+            self.state.img_prompt_crafting = False
+
+        # Now perform the actual generation using the handler function
+        # We import here to avoid circular imports
+        from . import handlers
+
+        print(
+            f"\n{utils.SYSTEM_MSG}--> Initiating image generation...{utils.RESET_COLOR}"
+        )
+
+        success = handlers.generate_image_from_session(self, final_prompt)
+
+        if success:
+            print(
+                f"\n{utils.SYSTEM_MSG}Image Context Management:{utils.RESET_COLOR}\n"
+                f"Generated images are automatically excluded from the conversation context\n"
+                f"to prevent token usage from growing too large. The AI remembers what we\n"
+                f"discussed about the image but doesn't keep the image data itself.\n"
+                f"You can always ask me to generate variations or similar images!"
+            )
+        else:
+            print(
+                f"\n{utils.SYSTEM_MSG}--> Image generation failed. "
+                f"You can try again with '/image --send-prompt' or refine your prompt.{utils.RESET_COLOR}"
+            )
+
+        return success
 
     def _get_history_for_helpers(self) -> str:
         return "\n".join(
@@ -970,8 +1183,9 @@ class MultiChatManager:
                 session_raw_logs=srl_list,
             )
             print()
-            cleaned_response = utils.clean_ai_response_text(engine.name, raw_response)
-            asst_msg = utils.construct_assistant_message("openai", cleaned_response)
+            cleaned = utils.clean_ai_response_text(engine.name, raw_response)
+            asst_msg_text = f"[{engine.name.capitalize()}]: {cleaned}"
+            asst_msg = utils.construct_assistant_message("openai", asst_msg_text)
             self.state.shared_history.extend(
                 [utils.construct_user_message("openai", user_msg_text, []), asst_msg]
             )
@@ -1031,9 +1245,12 @@ class MultiChatManager:
             primary_cleaned = utils.clean_ai_response_text(
                 primary_engine.name, primary_raw
             )
-            primary_msg = utils.construct_assistant_message("openai", primary_cleaned)
+            primary_msg = utils.construct_assistant_message(
+                "openai", f"[{primary_engine.name.capitalize()}]: {primary_cleaned}"
+            )
             secondary_msg = utils.construct_assistant_message(
-                "openai", secondary_result["text"]
+                "openai",
+                f"[{secondary_result['engine_name'].capitalize()}]: {secondary_result['text']}",
             )
 
             first, second = (
@@ -1047,32 +1264,8 @@ class MultiChatManager:
     def _log_multichat_turn(
         self, log_filepath: Path, history_slice: list[dict]
     ) -> None:
-        log_slice_copy = [dict(msg) for msg in history_slice]
-        user_msg = log_slice_copy[0]
-        user_text = utils.extract_text_from_message(user_msg)
-
-        if len(log_slice_copy) == 2:  # Targeted prompt
-            match = re.search(r"Director to (\w+):", user_text, re.IGNORECASE)
-            if match:
-                target_engine = match.group(1).lower()
-                asst_msg = log_slice_copy[1]
-                asst_text = utils.extract_text_from_message(asst_msg)
-                labeled_text = f"[{target_engine.capitalize()}]: {asst_text}"
-                asst_msg["content"] = labeled_text
-
-        elif len(log_slice_copy) == 3:  # "All" prompt
-            openai_msg, gemini_msg = (
-                (log_slice_copy[1], log_slice_copy[2])
-                if self.primary_engine_name == "openai"
-                else (log_slice_copy[2], log_slice_copy[1])
-            )
-            openai_text = utils.extract_text_from_message(openai_msg)
-            gemini_text = utils.extract_text_from_message(gemini_msg)
-            openai_msg["content"] = f"[Openai]: {openai_text}"
-            gemini_msg["content"] = f"[Gemini]: {gemini_text}"
-
         try:
             with open(log_filepath, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"history_slice": log_slice_copy}) + "\n")
+                f.write(json.dumps({"history_slice": history_slice}) + "\n")
         except OSError as e:
             log.warning("Could not write to multi-chat session log file: %s", e)
