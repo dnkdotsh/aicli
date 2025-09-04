@@ -675,6 +675,63 @@ class SessionManager:
             )
         )
 
+    def handle_image_command(self, args: list[str]) -> None:
+        """
+        Manages image generation workflows with intelligent state-based routing.
+
+        This method acts as a sophisticated dispatcher that examines the current
+        session state and user intent to determine the appropriate action.
+        """
+        send_immediately = "--send-prompt" in args
+        if send_immediately:
+            args = [arg for arg in args if arg != "--send-prompt"]
+
+        prompt_from_args = " ".join(args) if args else None
+
+        if self.state.img_prompt_crafting:
+            print(
+                f"{utils.SYSTEM_MSG}--> You're already in image crafting mode. "
+                f"Continue refining your prompt or type 'yes' to generate.{utils.RESET_COLOR}"
+            )
+            return
+
+        if send_immediately:
+            prompt_to_generate = (
+                prompt_from_args or self.state.img_prompt or self.state.last_img_prompt
+            )
+            if prompt_to_generate:
+                self.generate_image(prompt_to_generate)
+            else:
+                print(
+                    f"{utils.SYSTEM_MSG}--> No prompt available. Use '/image <desc>' to start.{utils.RESET_COLOR}"
+                )
+            return
+
+        if prompt_from_args:
+            print(
+                f"\n{utils.SYSTEM_MSG}--> Starting image prompt crafting...{utils.RESET_COLOR}"
+            )
+            self.start_image_prompt_crafting(prompt_from_args)
+        elif self.state.last_img_prompt:
+            print(
+                f"\n{utils.SYSTEM_MSG}Previous prompt found: '{self.state.last_img_prompt}'{utils.RESET_COLOR}"
+            )
+            choice = (
+                input("Refine, Regenerate, or start New? (r/g/n): ").lower().strip()
+            )
+            if choice in ["r", "refine"]:
+                self.start_image_prompt_crafting(self.state.last_img_prompt)
+            elif choice in ["g", "generate"]:
+                self.generate_image(self.state.last_img_prompt)
+            elif choice in ["n", "new"]:
+                self.start_image_prompt_crafting()
+            else:
+                print(
+                    f"{utils.SYSTEM_MSG}--> Invalid choice. Cancelled.{utils.RESET_COLOR}"
+                )
+        else:
+            self.start_image_prompt_crafting()
+
     def start_image_prompt_crafting(self, initial_prompt: str | None = None) -> None:
         """Transitions the session into image prompt crafting mode."""
         self.state.img_prompt_crafting = True

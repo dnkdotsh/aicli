@@ -168,8 +168,12 @@ def _perform_image_generation(
         "prompt": prompt,
         "n": 1,
         "size": "1024x1024",
-        "response_format": "b64_json",
     }
+    # Conditionally add the 'response_format' parameter. DALL-E models require
+    # it for base64-encoded output, while other models may not support it.
+    if "dall-e" in model:
+        payload["response_format"] = "b64_json"
+
     url = "https://api.openai.com/v1/images/generations"
     headers = {"Authorization": f"Bearer {api_key}"}
 
@@ -181,16 +185,19 @@ def _perform_image_generation(
         print(f"Error: {e}", file=sys.stderr)
         return False, None
 
-    if not (
-        response_data
-        and "data" in response_data
-        and response_data["data"]
-        and response_data["data"][0].get("b64_json")
-    ):
+    # Handle different response formats. DALL-E provides 'b64_json'.
+    # Other models might provide a direct URL or other formats.
+    b64_data = (
+        response_data.get("data", [{}])[0].get("b64_json") if response_data else None
+    )
+    # Add handling for other potential response formats here if needed
+    # elif response_data['data'][0].get('url'):
+    #     ...
+
+    if not b64_data:
         print("Error: API response did not contain image data.", file=sys.stderr)
         return False, None
 
-    b64_data = response_data["data"][0]["b64_json"]
     try:
         image_bytes = base64.b64decode(b64_data)
         filepath = utils.save_image_and_get_path(prompt, image_bytes, session_name)
@@ -227,7 +234,9 @@ def generate_image_from_session(session: "SessionManager", prompt: str) -> bool:
         original_engine = None
 
     current_model = session.state.model
-    if current_model and "dall-e" in current_model.lower():
+    if current_model and (
+        "dall-e" in current_model.lower() or "image" in current_model.lower()
+    ):
         model_to_use = current_model
     else:
         model_to_use = settings["default_openai_image_model"]

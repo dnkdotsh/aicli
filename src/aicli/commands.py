@@ -174,11 +174,13 @@ def handle_persona(args: list[str], session: SessionManager) -> None:
 def handle_image(args: list[str], session: SessionManager) -> None:
     """
     Handles all image generation workflows by delegating to the SessionManager.
-    This command handler is a thin wrapper that keeps the command map clean
-    and centralizes the complex logic within the SessionManager itself.
+
+    This function acts as a simple dispatcher. It passes the user's arguments
+    directly to the session manager, which contains the complex state and
+    workflow logic. This keeps the command map clean and adheres to our
+    architectural principle of centralizing state management in the session.
     """
-    # This function is not yet implemented.
-    pass
+    session.handle_image_command(args)
 
 
 # --- Multi-Chat Command Handler Functions ---
