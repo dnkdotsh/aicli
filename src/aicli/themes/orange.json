@@ -1,0 +1,14 @@
+{
+  "description": "A high-contrast theme with light orange text on a dark orange background.",
+  "prompt_color_user": "\u001b[33m",
+  "prompt_color_assistant": "\u001b[33m",
+  "prompt_color_system": "\u001b[93m",
+  "prompt_color_director": "\u001b[93m",
+  "style_bottom_toolbar_background": "bg:#3d1c00 fg:#ffc98a",
+  "style_bottom_toolbar_separator": "fg:#a84900",
+  "style_bottom_toolbar_tokens": "fg:#ffc98a bold",
+  "style_bottom_toolbar_io": "fg:#ffc98a",
+  "style_bottom_toolbar_model": "fg:#ffc98a",
+  "style_bottom_toolbar_persona": "fg:#ffc98a",
+  "style_bottom_toolbar_live": "fg:#ffc98a"
+}

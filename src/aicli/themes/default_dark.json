@@ -1,0 +1,14 @@
+{
+  "description": "A clean, high-contrast light theme.",
+  "prompt_color_user": "\u001b[38;5;32m",
+  "prompt_color_assistant": "\u001b[38;5;35m",
+  "prompt_color_system": "\u001b[38;5;108m",
+  "prompt_color_director": "\u001b[38;5;32m",
+  "style_bottom_toolbar_background": "bg:#E0E0E0 fg:#212121",
+  "style_bottom_toolbar_separator": "fg:#9E9E9E",
+  "style_bottom_toolbar_tokens": "fg:#212121 bold",
+  "style_bottom_toolbar_io": "fg:#212121",
+  "style_bottom_toolbar_model": "fg:#212121",
+  "style_bottom_toolbar_persona": "fg:#212121",
+  "style_bottom_toolbar_live": "fg:#212121"
+}

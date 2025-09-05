@@ -1,0 +1,14 @@
+{
+  "description": "A high-contrast theme with dark red text on a light red background.",
+  "prompt_color_user": "\u001b[31m",
+  "prompt_color_assistant": "\u001b[31m",
+  "prompt_color_system": "\u001b[91m",
+  "prompt_color_director": "\u001b[91m",
+  "style_bottom_toolbar_background": "bg:#ffe0e0 fg:#5b0000",
+  "style_bottom_toolbar_separator": "fg:#8d0000",
+  "style_bottom_toolbar_tokens": "fg:#5b0000 bold",
+  "style_bottom_toolbar_io": "fg:#5b0000",
+  "style_bottom_toolbar_model": "fg:#5b0000",
+  "style_bottom_toolbar_persona": "fg:#5b0000",
+  "style_bottom_toolbar_live": "fg:#5b0000"
+}

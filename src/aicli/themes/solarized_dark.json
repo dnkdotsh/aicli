@@ -1,0 +1,14 @@
+{
+  "description": "A theme based on the popular, high-contrast Solarized Light color palette.",
+  "prompt_color_user": "\u001b[34m",
+  "prompt_color_assistant": "\u001b[32m",
+  "prompt_color_system": "\u001b[33m",
+  "prompt_color_director": "\u001b[36m",
+  "style_bottom_toolbar_background": "bg:#fdf6e3 fg:#073642",
+  "style_bottom_toolbar_separator": "fg:#586e75",
+  "style_bottom_toolbar_tokens": "fg:#073642 bold",
+  "style_bottom_toolbar_io": "fg:#073642",
+  "style_bottom_toolbar_model": "fg:#073642",
+  "style_bottom_toolbar_persona": "fg:#073642",
+  "style_bottom_toolbar_live": "fg:#073642"
+}

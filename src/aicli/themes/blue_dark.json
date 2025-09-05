@@ -1,0 +1,14 @@
+{
+  "description": "A high-contrast theme with dark blue text on a light blue background.",
+  "prompt_color_user": "\u001b[34m",
+  "prompt_color_assistant": "\u001b[34m",
+  "prompt_color_system": "\u001b[94m",
+  "prompt_color_director": "\u001b[94m",
+  "style_bottom_toolbar_background": "bg:#e0f0ff fg:#001b3d",
+  "style_bottom_toolbar_separator": "fg:#004c99",
+  "style_bottom_toolbar_tokens": "fg:#001b3d bold",
+  "style_bottom_toolbar_io": "fg:#001b3d",
+  "style_bottom_toolbar_model": "fg:#001b3d",
+  "style_bottom_toolbar_persona": "fg:#001b3d",
+  "style_bottom_toolbar_live": "fg:#001b3d"
+}

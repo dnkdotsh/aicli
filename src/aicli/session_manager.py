@@ -743,9 +743,6 @@ class SingleChatManager:
         try:
             return Style.from_dict(
                 {
-                    "bottom-toolbar": theme_manager.ACTIVE_THEME.get(
-                        "style_bottom_toolbar_background", ""
-                    ),
                     "bottom-toolbar.separator": theme_manager.ACTIVE_THEME.get(
                         "style_bottom_toolbar_separator", ""
                     ),
@@ -775,45 +772,44 @@ class SingleChatManager:
 
     def _get_bottom_toolbar_content(self) -> Any | None:
         """Constructs the dynamic content for the prompt_toolkit bottom toolbar."""
-        if not app_settings.settings["toolbar_enabled"]:
-            return None
-
         component_map = {
             "tokens": (
                 True,
-                "bottom-toolbar.tokens",
+                "class:bottom-toolbar.tokens",
                 utils.format_token_string(self.session.state.last_turn_tokens),
             ),
             "io": (
                 app_settings.settings["toolbar_show_total_io"],
-                "bottom-toolbar.io",
+                "class:bottom-toolbar.io",
                 f"Session I/O: {self.session.state.total_prompt_tokens}p / {self.session.state.total_completion_tokens}c",
             ),
             "model": (
                 app_settings.settings["toolbar_show_model"],
-                "bottom-toolbar.model",
+                "class:bottom-toolbar.model",
                 f"Model: {self.session.state.model}",
             ),
             "persona": (
                 app_settings.settings["toolbar_show_persona"]
                 and self.session.state.current_persona,
-                "bottom-toolbar.persona",
+                "class:bottom-toolbar.persona",
                 f"Persona: {self.session.state.current_persona.name if self.session.state.current_persona else ''}",
             ),
             "live": (
                 app_settings.settings["toolbar_show_live_tokens"],
-                "bottom-toolbar.live",
+                "class:bottom-toolbar.live",
                 f"Live: ~{utils.estimate_token_count(get_app().current_buffer.text)}t",
             ),
         }
 
         order = app_settings.settings["toolbar_priority_order"].split(",")
         width = shutil.get_terminal_size().columns
-        final_parts = []
+
+        bg_style = theme_manager.ACTIVE_THEME.get("style_bottom_toolbar_background", "")
+        styled_parts = []
         current_length = 0
         separator = app_settings.settings["toolbar_separator"]
         sep_len = len(separator)
-        sep_style = "class:bottom-toolbar.separator"
+        sep_style_str = f"class:bottom-toolbar.separator {bg_style}"
 
         for key in order:
             if key not in component_map:
@@ -824,17 +820,24 @@ class SingleChatManager:
                 continue
 
             part_len = len(text)
-            required_len = part_len + (sep_len if final_parts else 0)
+            required_len = part_len + (sep_len if styled_parts else 0)
 
             if current_length + required_len > width:
                 break
 
-            if final_parts:
-                final_parts.append((sep_style, separator))
-            final_parts.append((f"class:{style_class}", text))
+            if styled_parts:
+                styled_parts.append((sep_style_str, separator))
+            styled_parts.append((f"{style_class} {bg_style}", text))
             current_length += required_len
 
-        return final_parts
+        padding_length = width - current_length
+        if padding_length > 0:
+            trail_style = theme_manager.ACTIVE_THEME.get(
+                "style_bottom_toolbar_trail", "bg:default"
+            )
+            styled_parts.append((trail_style, " " * padding_length))
+
+        return styled_parts
 
     def run(self) -> None:
         log_filename_base = (
@@ -857,10 +860,15 @@ class SingleChatManager:
 
         try:
             while True:
+                toolbar_content = (
+                    self._get_bottom_toolbar_content
+                    if app_settings.settings["toolbar_enabled"]
+                    else None
+                )
                 prompt_message = f"\n{utils.USER_PROMPT}You: {utils.RESET_COLOR}"
                 user_input = prompt_session.prompt(
                     ANSI(prompt_message),
-                    bottom_toolbar=self._get_bottom_toolbar_content,
+                    bottom_toolbar=toolbar_content,
                     refresh_interval=0.5,
                 ).strip()
                 if not user_input:

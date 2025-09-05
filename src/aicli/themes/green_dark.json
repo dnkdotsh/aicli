@@ -1,0 +1,14 @@
+{
+  "description": "An inverted 'Terminal' theme with dark green text on a light green background.",
+  "prompt_color_user": "\u001b[32m",
+  "prompt_color_assistant": "\u001b[32m",
+  "prompt_color_system": "\u001b[92m",
+  "prompt_color_director": "\u001b[92m",
+  "style_bottom_toolbar_background": "bg:#e0ffe0 fg:#003300",
+  "style_bottom_toolbar_separator": "fg:#008b00",
+  "style_bottom_toolbar_tokens": "fg:#003300 bold",
+  "style_bottom_toolbar_io": "fg:#003300",
+  "style_bottom_toolbar_model": "fg:#003300",
+  "style_bottom_toolbar_persona": "fg:#003300",
+  "style_bottom_toolbar_live": "fg:#003300"
+}

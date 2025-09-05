@@ -54,6 +54,9 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+aicli = ["themes/*"]
+
 [tool.coverage.run]
 omit = [
     "src/aicli/__init__.py",

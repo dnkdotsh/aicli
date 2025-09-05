@@ -1,0 +1,14 @@
+{
+  "description": "A high-contrast theme with light indigo text on a dark indigo background.",
+  "prompt_color_user": "\u001b[94m",
+  "prompt_color_assistant": "\u001b[94m",
+  "prompt_color_system": "\u001b[34m",
+  "prompt_color_director": "\u001b[34m",
+  "style_bottom_toolbar_background": "bg:#000a2e fg:#b6bfff",
+  "style_bottom_toolbar_separator": "fg:#00217a",
+  "style_bottom_toolbar_tokens": "fg:#b6bfff bold",
+  "style_bottom_toolbar_io": "fg:#b6bfff",
+  "style_bottom_toolbar_model": "fg:#b6bfff",
+  "style_bottom_toolbar_persona": "fg:#b6bfff",
+  "style_bottom_toolbar_live": "fg:#b6bfff"
+}

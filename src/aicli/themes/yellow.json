@@ -1,0 +1,14 @@
+{
+  "description": "A high-contrast theme with light yellow text on a dark yellow background.",
+  "prompt_color_user": "\u001b[93m",
+  "prompt_color_assistant": "\u001b[93m",
+  "prompt_color_system": "\u001b[33m",
+  "prompt_color_director": "\u001b[33m",
+  "style_bottom_toolbar_background": "bg:#3d3300 fg:#fff38a",
+  "style_bottom_toolbar_separator": "fg:#a88b00",
+  "style_bottom_toolbar_tokens": "fg:#fff38a bold",
+  "style_bottom_toolbar_io": "fg:#fff38a",
+  "style_bottom_toolbar_model": "fg:#fff38a",
+  "style_bottom_toolbar_persona": "fg:#fff38a",
+  "style_bottom_toolbar_live": "fg:#fff38a"
+}

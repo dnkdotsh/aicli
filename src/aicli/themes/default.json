@@ -1,14 +1,15 @@
 {
-  "description": "The default aicli theme with bright, classic terminal colors.",
-  "prompt_color_user": "\u001b[94m",
-  "prompt_color_assistant": "\u001b[92m",
-  "prompt_color_system": "\u001b[93m",
-  "prompt_color_director": "\u001b[95m",
-  "style_bottom_toolbar_background": "bg:#1e1e1e #ffffff",
-  "style_bottom_toolbar_separator": "fg:#6c6c6c",
-  "style_bottom_toolbar_tokens": "fg:#fdd835",
-  "style_bottom_toolbar_io": "fg:#03a9f4",
-  "style_bottom_toolbar_model": "fg:#ab47bc",
-  "style_bottom_toolbar_persona": "fg:#66bb6a",
-  "style_bottom_toolbar_live": "fg:#4fc3f7"
+  "description": "A clean, high-contrast dark theme.",
+  "prompt_color_user": "\u001b[38;5;111m",
+  "prompt_color_assistant": "\u001b[38;5;121m",
+  "prompt_color_system": "\u001b[38;5;180m",
+  "prompt_color_director": "\u001b[38;5;111m",
+  "style_bottom_toolbar_background": "bg:#212121 fg:#E0E0E0",
+  "style_bottom_toolbar_separator": "fg:#616161",
+  "style_bottom_toolbar_tokens": "fg:#E0E0E0 bold",
+  "style_bottom_toolbar_io": "fg:#E0E0E0",
+  "style_bottom_toolbar_model": "fg:#E0E0E0",
+  "style_bottom_toolbar_persona": "fg:#E0E0E0",
+  "style_bottom_toolbar_live": "fg:#E0E0E0",
+  "style_bottom_toolbar_trail": "bg:default"
 }

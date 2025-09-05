@@ -1,0 +1,14 @@
+{
+  "description": "A high-contrast theme with light violet text on a dark violet background.",
+  "prompt_color_user": "\u001b[95m",
+  "prompt_color_assistant": "\u001b[95m",
+  "prompt_color_system": "\u001b[35m",
+  "prompt_color_director": "\u001b[35m",
+  "style_bottom_toolbar_background": "bg:#2a003d fg:#e5b4ff",
+  "style_bottom_toolbar_separator": "fg:#7400a8",
+  "style_bottom_toolbar_tokens": "fg:#e5b4ff bold",
+  "style_bottom_toolbar_io": "fg:#e5b4ff",
+  "style_bottom_toolbar_model": "fg:#e5b4ff",
+  "style_bottom_toolbar_persona": "fg:#e5b4ff",
+  "style_bottom_toolbar_live": "fg:#e5b4ff"
+}
