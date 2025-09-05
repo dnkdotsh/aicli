@@ -53,7 +53,7 @@ source .venv/bin/activate
 # Install the package in editable mode with dev/test dependencies
 pip install -e ".[dev,test]"
 ```
-_Note: A bash-based easy-install script is planned for a future release._
+_Note: A bash-based easy-install script is planned for a future release. (Although how much easier does it get?)_
 
 ---
 
