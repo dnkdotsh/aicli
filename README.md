@@ -202,4 +202,5 @@ During an interactive session, type these commands instead of a prompt.
 
 ---
 
+### Final Thoughts
 <small>I literally just made this to make the AI argue against each other. I hope someone else can find a better use for it.</small>
