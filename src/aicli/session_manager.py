@@ -744,34 +744,33 @@ class SingleChatManager:
             return Style.from_dict(
                 {
                     "bottom-toolbar": theme_manager.ACTIVE_THEME.get(
-                        "style_bottom_toolbar_background"
+                        "style_bottom_toolbar_background", ""
                     ),
                     "bottom-toolbar.separator": theme_manager.ACTIVE_THEME.get(
-                        "style_bottom_toolbar_separator"
+                        "style_bottom_toolbar_separator", ""
                     ),
                     "bottom-toolbar.tokens": theme_manager.ACTIVE_THEME.get(
-                        "style_bottom_toolbar_tokens"
+                        "style_bottom_toolbar_tokens", ""
                     ),
                     "bottom-toolbar.io": theme_manager.ACTIVE_THEME.get(
-                        "style_bottom_toolbar_io"
+                        "style_bottom_toolbar_io", ""
                     ),
                     "bottom-toolbar.model": theme_manager.ACTIVE_THEME.get(
-                        "style_bottom_toolbar_model"
+                        "style_bottom_toolbar_model", ""
                     ),
                     "bottom-toolbar.persona": theme_manager.ACTIVE_THEME.get(
-                        "style_bottom_toolbar_persona"
+                        "style_bottom_toolbar_persona", ""
                     ),
                     "bottom-toolbar.live": theme_manager.ACTIVE_THEME.get(
-                        "style_bottom_toolbar_live"
+                        "style_bottom_toolbar_live", ""
                     ),
                 }
             )
-        except ValueError as e:
+        except (ValueError, TypeError) as e:
             print(
                 f"{utils.SYSTEM_MSG}--> Warning: Invalid theme style format detected: {e}{utils.RESET_COLOR}"
             )
             log.warning("Invalid theme style format: %s", e)
-            # Fallback to an empty style to prevent a crash
             return Style.from_dict({})
 
     def _get_bottom_toolbar_content(self) -> Any | None:
