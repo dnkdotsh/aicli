@@ -7,8 +7,7 @@
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY;
-# without even the implied warranty of
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -39,11 +38,11 @@ if TYPE_CHECKING:
 
     from .engine import AIEngine
 
-# ANSI color codes for prompts
-USER_PROMPT = "\033[94m"  # Bright Blue
-ASSISTANT_PROMPT = "\033[92m"  # Bright Green
-SYSTEM_MSG = "\033[93m"  # Bright Yellow
-DIRECTOR_PROMPT = "\033[95m"  # Bright Magenta
+# Load prompt colors from settings, with hardcoded defaults for resilience.
+USER_PROMPT = settings.get("prompt_color_user", "\033[94m")
+ASSISTANT_PROMPT = settings.get("prompt_color_assistant", "\033[92m")
+SYSTEM_MSG = settings.get("prompt_color_system", "\033[93m")
+DIRECTOR_PROMPT = settings.get("prompt_color_director", "\033[95m")
 RESET_COLOR = "\033[0m"
 
 SUPPORTED_TEXT_EXTENSIONS: set[str] = {
@@ -382,18 +381,23 @@ def extract_text_from_message(message: dict[str, Any]) -> str:
 
 
 def format_token_string(token_dict: dict[str, int]) -> str:
-    """Formats the token dictionary into a consistent string for display."""
-    p, c, t = (
-        token_dict.get("prompt", 0),
-        token_dict.get("completion", 0),
-        token_dict.get("total", 0),
-    )
+    """Formats the token dictionary into a consistent string for the toolbar."""
+    if not token_dict or not any(token_dict.values()):
+        return ""
+
+    p = token_dict.get("prompt", 0)
+    c = token_dict.get("completion", 0)
+    t = token_dict.get("total", 0)
     r = token_dict.get("reasoning", 0) or max(0, t - (p + c))
-    return (
-        f"\n{SYSTEM_MSG}[P:{p}/C:{c}/R:{r}/T:{t}]{RESET_COLOR}"
-        if any([p, c, t])
-        else ""
-    )
+    return f"[P:{p}/C:{c}/R:{r}/T:{t}]"
+
+
+def estimate_token_count(text: str) -> int:
+    """
+    Provides a simple, fast estimation of token count.
+    The ratio of characters to tokens is roughly 4:1 for English text.
+    """
+    return round(len(text) / 4)
 
 
 def format_bytes(byte_count: int) -> str:
@@ -449,6 +453,10 @@ Interactive Chat Commands:
   /persona <name>   Switch to a different persona. Use `/persona clear` to remove.
   /personas         List all available personas.
   /image [prompt]   Initiate the image generation workflow.
+  /toolbar [on|off|toggle <comp>]
+                    Control the bottom toolbar. Components: io, live, model, persona.
+  /style <prompt|toolbar> <comp> <val>
+                    Change display colors. e.g., /style toolbar model 'fg:ansired bold'
   /set [key] [val]  Change a setting (e.g., /set stream false).
   /max-tokens [num] Set max tokens for the session.
 """
@@ -580,7 +588,6 @@ def log_image_generation(
 ) -> None:
     """
     Writes a record of a successful image generation to the image log file.
-
     Args:
         model: The model used for generation.
         prompt: The full prompt used.

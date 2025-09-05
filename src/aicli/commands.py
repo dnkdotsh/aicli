@@ -7,8 +7,7 @@
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY;
-# without even the implied warranty of
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -32,7 +31,7 @@ from prompt_toolkit.history import InMemoryHistory
 
 from . import config, utils
 from .logger import log
-from .settings import save_setting
+from .settings import save_setting, settings
 
 if TYPE_CHECKING:
     from .session_manager import MultiChatSessionState, SessionManager
@@ -115,10 +114,94 @@ def handle_state(args: list[str], session: SessionManager) -> None:
 
 def handle_set(args: list[str], session: SessionManager) -> None:
     if len(args) == 2:
-        _success, message = save_setting(args[0], args[1])
+        key, value = args[0], args[1]
+        success, message = save_setting(key, value)
         print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
+        if success and (key.startswith("style_") or key.startswith("prompt_color_")):
+            session.state.ui_refresh_needed = True
     else:
         print(f"{utils.SYSTEM_MSG}--> Usage: /set <key> <value>.{utils.RESET_COLOR}")
+
+
+def handle_toolbar(args: list[str], session: SessionManager) -> None:
+    """Handles all toolbar configuration commands."""
+    if not args:
+        print(f"{utils.SYSTEM_MSG}--- Toolbar Settings ---{utils.RESET_COLOR}")
+        print(f"  Toolbar Enabled: {settings['toolbar_enabled']}")
+        print(f"  Component Order: {settings['toolbar_priority_order']}")
+        print(f"  Separator: '{settings['toolbar_separator']}'")
+        print(f"  Show Session I/O: {settings['toolbar_show_total_io']}")
+        print(f"  Show Live Tokens: {settings['toolbar_show_live_tokens']}")
+        print(f"  Show Model: {settings['toolbar_show_model']}")
+        print(f"  Show Persona: {settings['toolbar_show_persona']}")
+        return
+
+    command = args[0].lower()
+    valid_components = {
+        "io": "toolbar_show_total_io",
+        "live": "toolbar_show_live_tokens",
+        "model": "toolbar_show_model",
+        "persona": "toolbar_show_persona",
+    }
+
+    if command in ["on", "off"]:
+        _, message = save_setting("toolbar_enabled", command)
+        print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
+    elif command == "toggle" and len(args) == 2:
+        component_key = args[1].lower()
+        if component_key in valid_components:
+            setting_key = valid_components[component_key]
+            current_value = settings[setting_key]
+            _, message = save_setting(setting_key, str(not current_value))
+            print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
+        else:
+            print(
+                f"{utils.SYSTEM_MSG}--> Unknown component '{component_key}'. Valid components: {list(valid_components.keys())}{utils.RESET_COLOR}"
+            )
+    else:
+        print(
+            f"{utils.SYSTEM_MSG}--> Usage: /toolbar [on|off|toggle <component>]{utils.RESET_COLOR}"
+        )
+
+
+def handle_style(args: list[str], session: SessionManager) -> None:
+    """Handles configuration of display styles."""
+    style_map = {
+        "prompt": {
+            "user": "prompt_color_user",
+            "assistant": "prompt_color_assistant",
+            "system": "prompt_color_system",
+            "director": "prompt_color_director",
+        },
+        "toolbar": {
+            "bg": "style_bottom_toolbar_background",
+            "sep": "style_bottom_toolbar_separator",
+            "tokens": "style_bottom_toolbar_tokens",
+            "io": "style_bottom_toolbar_io",
+            "model": "style_bottom_toolbar_model",
+            "persona": "style_bottom_toolbar_persona",
+            "live": "style_bottom_toolbar_live",
+        },
+    }
+    if len(args) < 3:
+        print(
+            f"{utils.SYSTEM_MSG}--> Usage: /style <prompt|toolbar> <component> <value>{utils.RESET_COLOR}"
+        )
+        print("  e.g., /style prompt user '\\033[96m'")
+        print("  e.g., /style toolbar model 'fg:ansired bold'")
+        return
+
+    category, component, value = args[0].lower(), args[1].lower(), " ".join(args[2:])
+    if category in style_map and component in style_map[category]:
+        setting_key = style_map[category][component]
+        success, message = save_setting(setting_key, value)
+        print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
+        if success:
+            session.state.ui_refresh_needed = True
+    else:
+        print(
+            f"{utils.SYSTEM_MSG}--> Invalid style category or component.{utils.RESET_COLOR}"
+        )
 
 
 def handle_save(
@@ -174,7 +257,6 @@ def handle_persona(args: list[str], session: SessionManager) -> None:
 def handle_image(args: list[str], session: SessionManager) -> None:
     """
     Handles all image generation workflows by delegating to the SessionManager.
-
     This function acts as a simple dispatcher. It passes the user's arguments
     directly to the session manager, which contains the complex state and
     workflow logic. This keeps the command map clean and adheres to our
@@ -368,6 +450,8 @@ COMMAND_MAP = {
     "/history": handle_history,
     "/state": handle_state,
     "/set": handle_set,
+    "/toolbar": handle_toolbar,
+    "/style": handle_style,
     "/save": handle_save,
     "/load": handle_load,
     "/refresh": handle_refresh,
