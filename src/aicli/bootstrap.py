@@ -27,7 +27,7 @@ from importlib import resources
 from . import config
 from . import personas as persona_manager
 from .logger import log
-from .theming import USER_THEMES_DIR
+from .theme_manager import USER_THEMES_DIR
 
 
 def _prompt_for_api_keys() -> tuple[str, str]:
