@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 from prompt_toolkit import prompt
 from prompt_toolkit.history import InMemoryHistory
 
-from . import config, utils
+from . import config, theme_manager, utils
 from .logger import log
 from .settings import save_setting, settings
 
@@ -117,7 +117,8 @@ def handle_set(args: list[str], session: SessionManager) -> None:
         key, value = args[0], args[1]
         success, message = save_setting(key, value)
         print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
-        if success and (key.startswith("style_") or key.startswith("prompt_color_")):
+        if success and key == "active_theme":
+            theme_manager.reload_theme()
             session.state.ui_refresh_needed = True
     else:
         print(f"{utils.SYSTEM_MSG}--> Usage: /set <key> <value>.{utils.RESET_COLOR}")
@@ -164,43 +165,31 @@ def handle_toolbar(args: list[str], session: SessionManager) -> None:
         )
 
 
-def handle_style(args: list[str], session: SessionManager) -> None:
-    """Handles configuration of display styles."""
-    style_map = {
-        "prompt": {
-            "user": "prompt_color_user",
-            "assistant": "prompt_color_assistant",
-            "system": "prompt_color_system",
-            "director": "prompt_color_director",
-        },
-        "toolbar": {
-            "bg": "style_bottom_toolbar_background",
-            "sep": "style_bottom_toolbar_separator",
-            "tokens": "style_bottom_toolbar_tokens",
-            "io": "style_bottom_toolbar_io",
-            "model": "style_bottom_toolbar_model",
-            "persona": "style_bottom_toolbar_persona",
-            "live": "style_bottom_toolbar_live",
-        },
-    }
-    if len(args) < 3:
-        print(
-            f"{utils.SYSTEM_MSG}--> Usage: /style <prompt|toolbar> <component> <value>{utils.RESET_COLOR}"
-        )
-        print("  e.g., /style prompt user '\\033[96m'")
-        print("  e.g., /style toolbar model 'fg:ansired bold'")
+def handle_theme(args: list[str], session: SessionManager) -> None:
+    """Handles listing and applying themes."""
+    if not args:
+        print(f"{utils.SYSTEM_MSG}--- Available Themes ---{utils.RESET_COLOR}")
+        current_theme_name = settings.get("active_theme", "default")
+        for name, desc in theme_manager.list_themes().items():
+            prefix = " >" if name == current_theme_name else "  "
+            print(f"{prefix} {name}: {desc}")
         return
 
-    category, component, value = args[0].lower(), args[1].lower(), " ".join(args[2:])
-    if category in style_map and component in style_map[category]:
-        setting_key = style_map[category][component]
-        success, message = save_setting(setting_key, value)
+    theme_name = args[0].lower()
+    if theme_name not in theme_manager.list_themes():
+        print(
+            f"{utils.SYSTEM_MSG}--> Theme '{theme_name}' not found.{utils.RESET_COLOR}"
+        )
+        return
+
+    success, message = save_setting("active_theme", theme_name)
+    if success:
+        theme_manager.reload_theme()
+        session.state.ui_refresh_needed = True
         print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
-        if success:
-            session.state.ui_refresh_needed = True
     else:
         print(
-            f"{utils.SYSTEM_MSG}--> Invalid style category or component.{utils.RESET_COLOR}"
+            f"{utils.SYSTEM_MSG}--> Error setting theme: {message}{utils.RESET_COLOR}"
         )
 
 
@@ -451,7 +440,7 @@ COMMAND_MAP = {
     "/state": handle_state,
     "/set": handle_set,
     "/toolbar": handle_toolbar,
-    "/style": handle_style,
+    "/theme": handle_theme,
     "/save": handle_save,
     "/load": handle_load,
     "/refresh": handle_refresh,

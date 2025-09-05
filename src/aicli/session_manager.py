@@ -32,7 +32,7 @@ from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.styles import Style
 
-from . import api_client, commands, config, prompts, utils, workflows
+from . import api_client, commands, config, prompts, theme_manager, utils, workflows
 from . import personas as persona_manager
 from . import settings as app_settings
 from .engine import AIEngine, get_engine
@@ -736,34 +736,43 @@ class SingleChatManager:
     def __init__(self, session_manager: SessionManager, session_name: str | None):
         self.session = session_manager
         self.session_name = session_name
-        # Pass the session_name to the session manager for use in image naming
         self.session.session_name = session_name
 
-    def _create_style_from_settings(self) -> Style:
-        """Creates a prompt_toolkit Style object from the current app settings."""
-        return Style.from_dict(
-            {
-                "bottom-toolbar": app_settings.settings[
-                    "style_bottom_toolbar_background"
-                ],
-                "bottom-toolbar.separator": app_settings.settings[
-                    "style_bottom_toolbar_separator"
-                ],
-                "bottom-toolbar.tokens": app_settings.settings[
-                    "style_bottom_toolbar_tokens"
-                ],
-                "bottom-toolbar.io": app_settings.settings["style_bottom_toolbar_io"],
-                "bottom-toolbar.model": app_settings.settings[
-                    "style_bottom_toolbar_model"
-                ],
-                "bottom-toolbar.persona": app_settings.settings[
-                    "style_bottom_toolbar_persona"
-                ],
-                "bottom-toolbar.live": app_settings.settings[
-                    "style_bottom_toolbar_live"
-                ],
-            }
-        )
+    def _create_style_from_theme(self) -> Style:
+        """Creates a prompt_toolkit Style object from the current theme."""
+        try:
+            return Style.from_dict(
+                {
+                    "bottom-toolbar": theme_manager.ACTIVE_THEME.get(
+                        "style_bottom_toolbar_background"
+                    ),
+                    "bottom-toolbar.separator": theme_manager.ACTIVE_THEME.get(
+                        "style_bottom_toolbar_separator"
+                    ),
+                    "bottom-toolbar.tokens": theme_manager.ACTIVE_THEME.get(
+                        "style_bottom_toolbar_tokens"
+                    ),
+                    "bottom-toolbar.io": theme_manager.ACTIVE_THEME.get(
+                        "style_bottom_toolbar_io"
+                    ),
+                    "bottom-toolbar.model": theme_manager.ACTIVE_THEME.get(
+                        "style_bottom_toolbar_model"
+                    ),
+                    "bottom-toolbar.persona": theme_manager.ACTIVE_THEME.get(
+                        "style_bottom_toolbar_persona"
+                    ),
+                    "bottom-toolbar.live": theme_manager.ACTIVE_THEME.get(
+                        "style_bottom_toolbar_live"
+                    ),
+                }
+            )
+        except ValueError as e:
+            print(
+                f"{utils.SYSTEM_MSG}--> Warning: Invalid theme style format detected: {e}{utils.RESET_COLOR}"
+            )
+            log.warning("Invalid theme style format: %s", e)
+            # Fallback to an empty style to prevent a crash
+            return Style.from_dict({})
 
     def _get_bottom_toolbar_content(self) -> Any | None:
         """Constructs the dynamic content for the prompt_toolkit bottom toolbar."""
@@ -841,7 +850,7 @@ class SingleChatManager:
             f"Type '/help' for commands or '/exit' to end. Log file: {log_filepath.name}"
         )
 
-        style = self._create_style_from_settings()
+        style = self._create_style_from_theme()
         prompt_session = PromptSession(
             history=InMemoryHistory(self.session.state.command_history), style=style
         )
@@ -866,7 +875,7 @@ class SingleChatManager:
                         break
 
                     if self.session.state.ui_refresh_needed:
-                        prompt_session.style = self._create_style_from_settings()
+                        prompt_session.style = self._create_style_from_theme()
                         self.session.state.ui_refresh_needed = False
                     continue
 

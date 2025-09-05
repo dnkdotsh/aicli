@@ -24,6 +24,7 @@ venv/
 .coverage
 pytest.log
 htmlcov/
+*.bk
 
 # IDE and editor directories
 .idea/

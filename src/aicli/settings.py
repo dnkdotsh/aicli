@@ -38,6 +38,7 @@ def _get_default_settings() -> dict[str, Any]:
         # --- General ---
         "default_engine": "gemini",
         "api_timeout": 60,
+        "active_theme": "default",
         # --- Models ---
         "default_gemini_model": "gemini-1.5-flash-latest",
         "default_openai_chat_model": "gpt-4o-mini",
@@ -51,28 +52,14 @@ def _get_default_settings() -> dict[str, Any]:
         "summary_max_tokens": 4096,
         "log_rename_max_tokens": 2048,
         "image_prompt_refinement_max_tokens": 2048,
-        # --- Prompt Colors (ANSI escape codes for simple prints) ---
-        "prompt_color_user": "\033[94m",  # Bright Blue
-        "prompt_color_assistant": "\033[92m",  # Bright Green
-        "prompt_color_system": "\033[93m",  # Bright Yellow
-        "prompt_color_director": "\033[95m",  # Bright Magenta
-        # --- Toolbar General ---
+        # --- Toolbar Behavior ---
         "toolbar_enabled": True,
         "toolbar_separator": " | ",
         "toolbar_priority_order": "tokens,live,model,persona,io",
-        # --- Toolbar Component Visibility ---
         "toolbar_show_total_io": True,
         "toolbar_show_live_tokens": True,
         "toolbar_show_model": True,
         "toolbar_show_persona": True,
-        # --- Toolbar Styles (prompt_toolkit format) ---
-        "style_bottom_toolbar_background": "bg:#1e1e1e #ffffff",
-        "style_bottom_toolbar_separator": "fg:#6c6c6c",
-        "style_bottom_toolbar_tokens": "fg:#fdd835",
-        "style_bottom_toolbar_io": "fg:#03a9f4",
-        "style_bottom_toolbar_model": "fg:#ab47bc",
-        "style_bottom_toolbar_persona": "fg:#66bb6a",
-        "style_bottom_toolbar_live": "fg:#4fc3f7",
     }
 
 

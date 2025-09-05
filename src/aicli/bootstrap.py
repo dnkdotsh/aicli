@@ -20,11 +20,14 @@ structure is in place before execution.
 """
 
 import getpass
+import shutil
 import sys
+from importlib import resources
 
 from . import config
 from . import personas as persona_manager
 from .logger import log
+from .theming import USER_THEMES_DIR
 
 
 def _prompt_for_api_keys() -> tuple[str, str]:
@@ -66,6 +69,24 @@ def _create_dotenv_file(openai_key: str, gemini_key: str) -> None:
         sys.exit(1)
 
 
+def _copy_default_themes() -> None:
+    """Copies the default packaged themes to the user's theme directory."""
+    try:
+        packaged_themes_path = resources.files("aicli.themes")
+        for theme_resource in packaged_themes_path.iterdir():
+            if theme_resource.name.endswith(".json"):
+                dest_path = USER_THEMES_DIR / theme_resource.name
+                with resources.as_file(theme_resource) as src_path:
+                    shutil.copy2(src_path, dest_path)
+        log.info("Copied default themes to %s", USER_THEMES_DIR)
+    except (ModuleNotFoundError, FileNotFoundError, OSError) as e:
+        log.error("Could not copy default themes: %s", e)
+        print(
+            f"\nWarning: Could not copy default themes to {USER_THEMES_DIR}: {e}",
+            file=sys.stderr,
+        )
+
+
 def _perform_first_run_setup() -> None:
     """Guides the user through the initial setup process."""
     print("--- Welcome to aicli! ---")
@@ -79,6 +100,7 @@ def _perform_first_run_setup() -> None:
         config.IMAGE_DIRECTORY,
         config.SESSIONS_DIRECTORY,
         config.PERSONAS_DIRECTORY,
+        USER_THEMES_DIR,
     ]
 
     print("\nThe following directories will be created:")
@@ -105,6 +127,10 @@ def _perform_first_run_setup() -> None:
         print("\n--> Creating default 'aicli_assistant' persona...")
         persona_manager.create_default_persona_if_missing()
         print("--> Default persona created successfully.")
+
+        print("\n--> Copying default themes...")
+        _copy_default_themes()
+        print("--> Default themes copied successfully.")
 
         print("\n--- Setup Complete! ---")
         print(
@@ -144,6 +170,7 @@ def ensure_project_structure() -> None:
             config.IMAGE_DIRECTORY,
             config.SESSIONS_DIRECTORY,
             config.PERSONAS_DIRECTORY,
+            USER_THEMES_DIR,
         ]
         try:
             for path in required_dirs:
@@ -152,6 +179,11 @@ def ensure_project_structure() -> None:
                     path.mkdir(parents=True, exist_ok=True)
 
             persona_manager.create_default_persona_if_missing()
+
+            # Copy themes if the user's theme dir is empty, in case they deleted them
+            if not any(USER_THEMES_DIR.iterdir()):
+                log.info("User themes directory is empty. Copying defaults.")
+                _copy_default_themes()
 
             if not config.DOTENV_FILE.exists():
                 log.warning(".env file not found. Creating an empty one.")

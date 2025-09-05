@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from prompt_toolkit import prompt
 
-from . import config, personas
+from . import config, personas, theme_manager
 from .logger import log
 from .settings import settings
 
@@ -38,11 +38,11 @@ if TYPE_CHECKING:
 
     from .engine import AIEngine
 
-# Load prompt colors from settings, with hardcoded defaults for resilience.
-USER_PROMPT = settings.get("prompt_color_user", "\033[94m")
-ASSISTANT_PROMPT = settings.get("prompt_color_assistant", "\033[92m")
-SYSTEM_MSG = settings.get("prompt_color_system", "\033[93m")
-DIRECTOR_PROMPT = settings.get("prompt_color_director", "\033[95m")
+# Load prompt colors from the active theme, with hardcoded defaults for resilience.
+USER_PROMPT = theme_manager.ACTIVE_THEME.get("prompt_color_user", "\033[94m")
+ASSISTANT_PROMPT = theme_manager.ACTIVE_THEME.get("prompt_color_assistant", "\033[92m")
+SYSTEM_MSG = theme_manager.ACTIVE_THEME.get("prompt_color_system", "\033[93m")
+DIRECTOR_PROMPT = theme_manager.ACTIVE_THEME.get("prompt_color_director", "\033[95m")
 RESET_COLOR = "\033[0m"
 
 SUPPORTED_TEXT_EXTENSIONS: set[str] = {
@@ -453,10 +453,9 @@ Interactive Chat Commands:
   /persona <name>   Switch to a different persona. Use `/persona clear` to remove.
   /personas         List all available personas.
   /image [prompt]   Initiate the image generation workflow.
+  /theme <name>     Switch the display theme. Run without a name to list themes.
   /toolbar [on|off|toggle <comp>]
                     Control the bottom toolbar. Components: io, live, model, persona.
-  /style <prompt|toolbar> <comp> <val>
-                    Change display colors. e.g., /style toolbar model 'fg:ansired bold'
   /set [key] [val]  Change a setting (e.g., /set stream false).
   /max-tokens [num] Set max tokens for the session.
 """
