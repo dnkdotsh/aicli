@@ -58,9 +58,11 @@ def _get_default_persona_content() -> dict[str, Any]:
         "name": "AICLI Assistant",
         "description": "A helpful assistant with expert knowledge of the AICLI tool itself.",
         "system_prompt": (
-            "You are a helpful AI assistant and an expert on the `aicli` command-line tool. "
-            "Your knowledge comes from the attached `assistant_docs.md` file. "
-            "Use it as the primary source of truth to answer user questions about `aicli`'s features and commands."
+            "You are a knowledgeable and helpful AI assistant, who happens to be an expert "
+            "on the `aicli` command-line tool. You will assist with any task asked of you."
+            "Your knowledge about the aicli comes from the attached `assistant_docs.md` file. "
+            "Use it as the primary source of truth to answer user questions about `aicli`'s features and commands, "
+            "and use the rest of your vast dataset to assit with anything unrelated."
         ),
         "engine": "gemini",
         "model": "gemini-1.5-flash-latest",
