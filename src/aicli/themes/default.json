@@ -10,6 +10,5 @@
   "style_bottom_toolbar_io": "fg:#E0E0E0",
   "style_bottom_toolbar_model": "fg:#E0E0E0",
   "style_bottom_toolbar_persona": "fg:#E0E0E0",
-  "style_bottom_toolbar_live": "fg:#E0E0E0",
-  "style_bottom_toolbar_trail": "bg:default"
+  "style_bottom_toolbar_live": "fg:#E0E0E0"
 }

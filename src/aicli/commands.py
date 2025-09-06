@@ -27,6 +27,7 @@ from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from prompt_toolkit import prompt
+from prompt_toolkit.application import get_app
 from prompt_toolkit.history import InMemoryHistory
 
 from . import config, theme_manager, utils
@@ -117,9 +118,12 @@ def handle_set(args: list[str], session: SessionManager) -> None:
         key, value = args[0], args[1]
         success, message = save_setting(key, value)
         print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
-        if success and key == "active_theme":
-            theme_manager.reload_theme()
+        if success:
             session.state.ui_refresh_needed = True
+            # Force a full redraw for settings that might affect the UI layout
+            if key in ["active_theme", "toolbar_enabled"]:
+                theme_manager.reload_theme()
+                get_app().invalidate()
     else:
         print(f"{utils.SYSTEM_MSG}--> Usage: /set <key> <value>.{utils.RESET_COLOR}")
 
@@ -146,15 +150,21 @@ def handle_toolbar(args: list[str], session: SessionManager) -> None:
     }
 
     if command in ["on", "off"]:
-        _, message = save_setting("toolbar_enabled", command)
+        success, message = save_setting("toolbar_enabled", command)
         print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
+        if success:
+            session.state.ui_refresh_needed = True
+            get_app().invalidate()
     elif command == "toggle" and len(args) == 2:
         component_key = args[1].lower()
         if component_key in valid_components:
             setting_key = valid_components[component_key]
             current_value = settings[setting_key]
-            _, message = save_setting(setting_key, str(not current_value))
+            success, message = save_setting(setting_key, str(not current_value))
             print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
+            if success:
+                session.state.ui_refresh_needed = True
+                get_app().invalidate()
         else:
             print(
                 f"{utils.SYSTEM_MSG}--> Unknown component '{component_key}'. Valid components: {list(valid_components.keys())}{utils.RESET_COLOR}"
@@ -186,6 +196,7 @@ def handle_theme(args: list[str], session: SessionManager) -> None:
     if success:
         theme_manager.reload_theme()
         session.state.ui_refresh_needed = True
+        get_app().invalidate()
         print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
     else:
         print(

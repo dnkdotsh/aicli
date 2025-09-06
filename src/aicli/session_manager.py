@@ -735,6 +735,7 @@ class SingleChatManager:
 
     def __init__(self, session_manager: SessionManager, session_name: str | None):
         self.session = session_manager
+        # This instance needs its own reference to the session_name for the run loop.
         self.session_name = session_name
         self.session.session_name = session_name
 
@@ -743,6 +744,10 @@ class SingleChatManager:
         try:
             return Style.from_dict(
                 {
+                    # Apply background to the entire toolbar container
+                    "bottom-toolbar": theme_manager.ACTIVE_THEME.get(
+                        "style_bottom_toolbar_background", ""
+                    ),
                     "bottom-toolbar.separator": theme_manager.ACTIVE_THEME.get(
                         "style_bottom_toolbar_separator", ""
                     ),
@@ -804,12 +809,11 @@ class SingleChatManager:
         order = app_settings.settings["toolbar_priority_order"].split(",")
         width = shutil.get_terminal_size().columns
 
-        bg_style = theme_manager.ACTIVE_THEME.get("style_bottom_toolbar_background", "")
         styled_parts = []
         current_length = 0
         separator = app_settings.settings["toolbar_separator"]
         sep_len = len(separator)
-        sep_style_str = f"class:bottom-toolbar.separator {bg_style}"
+        sep_style_str = "class:bottom-toolbar.separator"
 
         for key in order:
             if key not in component_map:
@@ -827,16 +831,11 @@ class SingleChatManager:
 
             if styled_parts:
                 styled_parts.append((sep_style_str, separator))
-            styled_parts.append((f"{style_class} {bg_style}", text))
+            styled_parts.append((style_class, text))
             current_length += required_len
 
-        padding_length = width - current_length
-        if padding_length > 0:
-            trail_style = theme_manager.ACTIVE_THEME.get(
-                "style_bottom_toolbar_trail", "bg:default"
-            )
-            styled_parts.append((trail_style, " " * padding_length))
-
+        # The container style now handles the background color for the entire bar,
+        # removing the need for manual trailing space calculation.
         return styled_parts
 
     def run(self) -> None:
@@ -984,7 +983,7 @@ class MultiChatManager:
         print(
             f"Starting interactive multi-chat. Primary: {self.primary_engine_name.capitalize()}. Log: {log_filepath.name}"
         )
-        print("Type /help for commands or /exit to end.")
+        print("Type /help for commands or '/exit to end.")
 
         cli_history = InMemoryHistory(self.state.command_history)
         if self.initial_prompt:
