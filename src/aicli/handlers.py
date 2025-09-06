@@ -22,8 +22,9 @@ from . import api_client, config, workflows
 from .chat_ui import MultiChatUI, SingleChatUI
 from .engine import get_engine
 from .managers.context_manager import ContextManager
+from .managers.multichat_manager import MultiChatSession
+from .managers.session_manager import SessionManager
 from .prompts import MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI
-from .session_manager import MultiChatSession, SessionManager
 from .session_state import MultiChatSessionState
 from .settings import settings
 from .utils.config_loader import resolve_config_precedence
