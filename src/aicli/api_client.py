@@ -1,14 +1,13 @@
 # aicli/api_client.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 Dank A. Saurus
+# Copyright (C) 2025 David
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY;
-# without even the implied warranty of
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -25,10 +24,11 @@ import sys
 
 import requests
 
-from . import config, utils
+from . import config
 from .engine import AIEngine
 from .logger import log
 from .settings import settings
+from .utils.formatters import RESET_COLOR, SYSTEM_MSG
 
 
 class MissingApiKeyError(Exception):
@@ -224,13 +224,11 @@ def _process_stream(
     except KeyboardInterrupt:
         if print_stream:
             # A newline is needed to move the cursor to the next line after the partial response.
-            print(
-                f"\n{utils.SYSTEM_MSG}--> Stream interrupted by user.{utils.RESET_COLOR}"
-            )
+            print(f"\n{SYSTEM_MSG}--> Stream interrupted by user.{RESET_COLOR}")
     except Exception as e:
         if print_stream:
             print(
-                f"\n{utils.SYSTEM_MSG}--> Stream interrupted by network/API error: {e}{utils.RESET_COLOR}"
+                f"\n{SYSTEM_MSG}--> Stream interrupted by network/API error: {e}{RESET_COLOR}"
             )
         log.warning("Stream processing error: %s", e)
     tokens = {"prompt": p, "completion": c, "reasoning": r, "total": t}

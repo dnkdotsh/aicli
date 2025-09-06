@@ -1,6 +1,6 @@
 # aicli/handlers.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 Dank A. Saurus
+# Copyright (C) 2025 David
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,18 +18,25 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import api_client, config, utils, workflows
+from . import api_client, config, workflows
 from .chat_ui import MultiChatUI, SingleChatUI
 from .engine import get_engine
 from .prompts import MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI
 from .session_manager import MultiChatSession, SessionManager
 from .session_state import MultiChatSessionState
 from .settings import settings
+from .utils.config_loader import resolve_config_precedence
+from .utils.file_processor import (
+    process_files,
+    read_system_prompt,
+)
+from .utils.formatters import RESET_COLOR, SYSTEM_MSG, format_bytes
+from .utils.ui_helpers import select_model
 
 
 def handle_chat(initial_prompt: str | None, args: argparse.Namespace) -> None:
     """Handles both single-shot and interactive chat sessions."""
-    config_params = utils.resolve_config_precedence(args)
+    config_params = resolve_config_precedence(args)
 
     session = SessionManager(
         engine_name=config_params["engine_name"],
@@ -51,10 +58,10 @@ def handle_chat(initial_prompt: str | None, args: argparse.Namespace) -> None:
 
     if total_attachment_bytes > config.LARGE_ATTACHMENT_THRESHOLD_BYTES:
         warning_msg = (
-            f"{utils.SYSTEM_MSG}--> Warning: The total size of attached files "
-            f"({utils.format_bytes(total_attachment_bytes)}) exceeds the recommended "
-            f"threshold ({utils.format_bytes(config.LARGE_ATTACHMENT_THRESHOLD_BYTES)}).\n"
-            f"    This may result in high API costs and slower responses.{utils.RESET_COLOR}"
+            f"{SYSTEM_MSG}--> Warning: The total size of attached files "
+            f"({format_bytes(total_attachment_bytes)}) exceeds the recommended "
+            f"threshold ({format_bytes(config.LARGE_ATTACHMENT_THRESHOLD_BYTES)}).\n"
+            f"    This may result in high API costs and slower responses.{RESET_COLOR}"
         )
         print(warning_msg, file=sys.stderr)
 
@@ -106,7 +113,7 @@ def handle_multichat_session(
     openai_key = api_client.check_api_keys("openai")
     gemini_key = api_client.check_api_keys("gemini")
 
-    _, attachments, image_data = utils.process_files(
+    _, attachments, image_data = process_files(
         args.file, use_memory=False, exclusions=args.exclude
     )
     attachment_texts = [
@@ -117,7 +124,7 @@ def handle_multichat_session(
 
     base_system_prompt = ""
     if args.system_prompt:
-        base_system_prompt = utils.read_system_prompt(args.system_prompt)
+        base_system_prompt = read_system_prompt(args.system_prompt)
     if attachments_str:
         base_system_prompt += f"\n\n--- ATTACHED FILES ---\n{attachments_str}"
 
@@ -158,7 +165,7 @@ def handle_image_generation(prompt: str | None, args: argparse.Namespace) -> Non
     api_key = api_client.check_api_keys("openai")
     engine = get_engine("openai", api_key)
 
-    model = args.model or utils.select_model(engine, "image")
+    model = args.model or select_model(engine, "image")
 
     if not prompt:
         prompt = (

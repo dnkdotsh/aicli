@@ -1,14 +1,13 @@
 # aicli/engine.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 Dank A. Saurus
+# Copyright (C) 2025 David
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY;
-# without even the implied warranty of
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -105,12 +104,12 @@ class OpenAIEngine(AIEngine):
 
     def parse_chat_response(self, response_data: dict[str, Any]) -> str:
         # Local import to break circular dependency: engine -> utils -> engine
-        from . import utils
+        from .utils.message_builder import extract_text_from_message
 
         if "choices" in response_data and response_data["choices"]:
             message = response_data["choices"][0].get("message")
             if message:
-                return utils.extract_text_from_message(message)
+                return extract_text_from_message(message)
         return ""
 
     def fetch_available_models(self, task: str) -> list[str]:
