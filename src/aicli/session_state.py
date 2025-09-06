@@ -41,6 +41,8 @@ class SessionState:
     max_tokens: int | None
     memory_enabled: bool
     attachments: dict[Path, str] = field(default_factory=dict)
+    # Tracks which attachments were added by a persona, to be removed on switch.
+    persona_attachments: set[Path] = field(default_factory=set)
     attached_images: list[dict[str, Any]] = field(default_factory=list)
     history: list[dict[str, Any]] = field(default_factory=list)
     command_history: list[str] = field(default_factory=list)

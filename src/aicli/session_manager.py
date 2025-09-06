@@ -59,9 +59,9 @@ class SessionManager:
         engine_instance = get_engine(engine_name, api_key)
         final_model = model or utils.get_default_model_for_engine(engine_name)
 
+        persona_attachment_path_strs = set(persona.attachments if persona else [])
         all_files_to_process = list(files_arg or [])
-        if persona and persona.attachments:
-            all_files_to_process.extend(persona.attachments)
+        all_files_to_process.extend(persona_attachment_path_strs)
 
         memory_content, attachments, image_data = utils.process_files(
             all_files_to_process, memory_enabled, exclude_arg
@@ -82,6 +82,10 @@ class SessionManager:
             "\n\n".join(system_prompt_parts) if system_prompt_parts else None
         )
 
+        persona_attachments_set = {
+            p for p in attachments if str(p) in persona_attachment_path_strs
+        }
+
         self.state = SessionState(
             engine=engine_instance,
             model=final_model,
@@ -91,6 +95,7 @@ class SessionManager:
             max_tokens=max_tokens,
             memory_enabled=memory_enabled,
             attachments=attachments,
+            persona_attachments=persona_attachments_set,
             attached_images=image_data,
             debug_active=debug_active,
             stream_active=stream_active,
@@ -339,7 +344,7 @@ class SessionManager:
 
     def set_model(self, model_name: str) -> None:
         self.state.model = model_name
-        print(f"{utils.SYSTEM_MSG}--> Model set to: {model_name}{utils.RESET_COLOR}")
+        print(f"{utils.SYSTEM_MSG}--> Model set to: {model_name}.{utils.RESET_COLOR}")
 
     def switch_engine(self, new_engine_name: str | None = None) -> None:
         if not new_engine_name:
@@ -457,6 +462,11 @@ class SessionManager:
             if "attachments" in data:
                 data["attachments"] = {
                     Path(k): v for k, v in data["attachments"].items()
+                }
+
+            if "persona_attachments" in data:
+                data["persona_attachments"] = {
+                    Path(p) for p in data["persona_attachments"]
                 }
 
             persona_filename = data.get("current_persona")
@@ -587,6 +597,8 @@ class SessionManager:
         )
         if path_to_remove:
             del self.state.attachments[path_to_remove]
+            # Also remove from persona tracking if it was a persona file
+            self.state.persona_attachments.discard(path_to_remove)
             print(
                 f"{utils.SYSTEM_MSG}--> Detached file: {path_to_remove.name}{utils.RESET_COLOR}"
             )
@@ -596,6 +608,11 @@ class SessionManager:
             )
 
     def switch_persona(self, name: str) -> None:
+        # Remove attachments from the old persona, if any
+        for path in self.state.persona_attachments:
+            self.state.attachments.pop(path, None)
+        self.state.persona_attachments.clear()
+
         if name.lower() == "clear":
             if not self.state.current_persona:
                 print(
@@ -632,6 +649,17 @@ class SessionManager:
         if new_persona.stream is not None:
             self.state.stream_active = new_persona.stream
 
+        # Add attachments from the new persona
+        if new_persona.attachments:
+            _, new_attachments, _ = utils.process_files(
+                new_persona.attachments, use_memory=False, exclusions=[]
+            )
+            self.state.attachments.update(new_attachments)
+            self.state.persona_attachments.update(new_attachments.keys())
+            print(
+                f"{utils.SYSTEM_MSG}--> Attached {len(new_attachments)} file(s) from persona.{utils.RESET_COLOR}"
+            )
+
         self.state.system_prompt = new_persona.system_prompt
         self.state.current_persona = new_persona
         print(
@@ -665,6 +693,9 @@ class SessionManager:
         state_dict["attachments"] = {
             str(k): v for k, v in self.state.attachments.items()
         }
+        state_dict["persona_attachments"] = [
+            str(p) for p in self.state.persona_attachments
+        ]
         state_dict["current_persona"] = (
             self.state.current_persona.filename if self.state.current_persona else None
         )
