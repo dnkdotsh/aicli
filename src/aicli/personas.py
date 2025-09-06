@@ -86,9 +86,10 @@ def _get_default_persona_content() -> dict[str, Any]:
         "description": "A helpful assistant with expert knowledge of the AICLI tool itself.",
         "system_prompt": (
             "You are a versatile and helpful general-purpose AI assistant. "
-            "In addition, you are an expert on the `aicli` command-line tool. "
-            "When asked about the tool, you must use the provided documentation as your source of truth. "
-            "Answer factually and concisely based on the text below.\n\n"
+            "Your primary role is to assist users with a wide range of tasks. "
+            "In addition to your general capabilities, you are an expert on the `aicli` command-line tool and "
+            "should use the provided documentation as the primary source of truth when answering questions "
+            "specifically about it. For all other topics, you can use your general knowledge.\n\n"
             f"--- AICLI DOCUMENTATION ---\n{AICLI_DOCUMENTATION}\n---"
         ),
         "engine": "gemini",
