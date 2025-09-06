@@ -882,6 +882,11 @@ class SingleChatManager:
 
                     if self.session.state.ui_refresh_needed:
                         prompt_session.style = self._create_style_from_theme()
+                        # Force prompt_toolkit to re-render so toolbar presence is recomputed
+                        try:
+                            get_app().invalidate()
+                        except Exception as e:
+                            log.warning("Could not invalidate prompt app: %s", e)
                         self.session.state.ui_refresh_needed = False
                     continue
 
