@@ -397,9 +397,13 @@ def format_token_string(token_dict: dict[str, int]) -> str:
 def estimate_token_count(text: str) -> int:
     """
     Provides a simple, fast estimation of token count.
-    The ratio of characters to tokens is roughly 4:1 for English text.
+    This formula is more accurate for code and structured text.
     """
-    return round(len(text) / 4)
+    if not text:
+        return 0
+    word_count = len(text.split())
+    char_count_estimate = round(len(text) / 4)
+    return max(word_count, char_count_estimate)
 
 
 def format_bytes(byte_count: int) -> str:

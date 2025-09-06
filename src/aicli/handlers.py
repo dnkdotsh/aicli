@@ -44,6 +44,32 @@ def handle_chat(initial_prompt: str | None, args: argparse.Namespace) -> None:
         exclude_arg=config_params["exclude_arg"],
     )
 
+    # Check for large context size and warn the user.
+    total_attachment_bytes = sum(
+        len(content.encode("utf-8")) for content in session.state.attachments.values()
+    )
+
+    if total_attachment_bytes > config.LARGE_ATTACHMENT_THRESHOLD_BYTES:
+        warning_msg = (
+            f"{utils.SYSTEM_MSG}--> Warning: The total size of attached files "
+            f"({utils.format_bytes(total_attachment_bytes)}) exceeds the recommended "
+            f"threshold ({utils.format_bytes(config.LARGE_ATTACHMENT_THRESHOLD_BYTES)}).\n"
+            f"    This may result in high API costs and slower responses.{utils.RESET_COLOR}"
+        )
+        print(warning_msg, file=sys.stderr)
+
+        if not initial_prompt:  # Only ask for confirmation in interactive mode
+            try:
+                confirm = (
+                    input("    Proceed with this context? (y/N): ").lower().strip()
+                )
+                if confirm not in ["y", "yes"]:
+                    print("Operation cancelled by user.")
+                    sys.exit(0)
+            except (KeyboardInterrupt, EOFError):
+                print("\nOperation cancelled by user.")
+                sys.exit(0)
+
     if initial_prompt:
         # Single-shot mode
         session.handle_single_shot(initial_prompt)

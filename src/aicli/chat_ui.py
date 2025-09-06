@@ -90,6 +90,21 @@ class SingleChatUI:
 
     def _get_bottom_toolbar_content(self) -> Any | None:
         """Constructs the dynamic content for the prompt_toolkit bottom toolbar."""
+        # --- Live Context Token Estimation ---
+        base_context_tokens = 0
+        full_system_prompt = self.session._assemble_full_system_prompt()
+        if full_system_prompt:
+            base_context_tokens += utils.estimate_token_count(full_system_prompt)
+
+        for message in self.session.state.history:
+            text_content = utils.extract_text_from_message(message)
+            base_context_tokens += utils.estimate_token_count(text_content)
+
+        live_buffer_text = get_app().current_buffer.text
+        live_buffer_tokens = utils.estimate_token_count(live_buffer_text)
+        total_live_tokens = base_context_tokens + live_buffer_tokens
+
+        # --- Component Mapping ---
         component_map = {
             "tokens": (
                 True,
@@ -115,7 +130,7 @@ class SingleChatUI:
             "live": (
                 app_settings.settings["toolbar_show_live_tokens"],
                 "class:bottom-toolbar.live",
-                f"Live: ~{utils.estimate_token_count(get_app().current_buffer.text)}t",
+                f"Live Context: ~{total_live_tokens}t",
             ),
         }
 
