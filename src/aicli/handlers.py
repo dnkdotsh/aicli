@@ -1,6 +1,6 @@
 # aicli/handlers.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 David
+# Copyright (C) 2025 Dank A. Saurus
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,15 +21,13 @@ from pathlib import Path
 from . import api_client, config, workflows
 from .chat_ui import MultiChatUI, SingleChatUI
 from .engine import get_engine
+from .managers.context_manager import ContextManager
 from .prompts import MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI
 from .session_manager import MultiChatSession, SessionManager
 from .session_state import MultiChatSessionState
 from .settings import settings
 from .utils.config_loader import resolve_config_precedence
-from .utils.file_processor import (
-    process_files,
-    read_system_prompt,
-)
+from .utils.file_processor import read_system_prompt
 from .utils.formatters import RESET_COLOR, SYSTEM_MSG, format_bytes
 from .utils.ui_helpers import select_model
 
@@ -113,9 +111,12 @@ def handle_multichat_session(
     openai_key = api_client.check_api_keys("openai")
     gemini_key = api_client.check_api_keys("gemini")
 
-    _, attachments, image_data = process_files(
-        args.file, use_memory=False, exclusions=args.exclude
+    context = ContextManager(
+        files_arg=args.file, use_memory=False, exclude_arg=args.exclude
     )
+    attachments = context.attachments
+    image_data = context.image_data
+
     attachment_texts = [
         f"--- FILE: {path.as_posix()} ---\n{content}"
         for path, content in attachments.items()

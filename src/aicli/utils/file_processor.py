@@ -19,15 +19,10 @@ Handles processing of files and directories for context, including reading
 text files, archives, and managing image data.
 """
 
-import base64
 import datetime
 import json
 import mimetypes
-import os
-import tarfile
-import zipfile
 from pathlib import Path
-from typing import Any
 
 from .. import config
 from ..logger import log
@@ -122,122 +117,6 @@ def is_supported_image_file(filepath: Path) -> bool:
     """Check if a file is a supported image file based on its MIME type."""
     mimetype, _ = mimetypes.guess_type(filepath)
     return mimetype in SUPPORTED_IMAGE_MIMETYPES
-
-
-def process_files(
-    paths: list[str] | None, use_memory: bool, exclusions: list[str] | None
-) -> tuple[str | None, dict[Path, str], list[dict[str, Any]]]:
-    """
-    Processes files, directories, and memory to build context.
-    Returns memory content, a dictionary of attachment paths to content, and image data.
-    """
-    paths = paths or []
-    exclusions = exclusions or []
-
-    memory_content: str | None = None
-    attachments_dict: dict[Path, str] = {}
-    image_data_parts: list[dict[str, Any]] = []
-
-    if use_memory and config.PERSISTENT_MEMORY_FILE.exists():
-        try:
-            memory_content = config.PERSISTENT_MEMORY_FILE.read_text(encoding="utf-8")
-        except OSError as e:
-            log.warning("Could not read persistent memory file: %s", e)
-
-    exclusion_paths = {Path(p).expanduser().resolve() for p in exclusions}
-
-    def process_text_file(filepath: Path):
-        try:
-            with open(filepath, encoding="utf-8", errors="ignore") as f:
-                attachments_dict[filepath] = f.read()
-        except OSError as e:
-            log.warning("Could not read file %s: %s", filepath, e)
-
-    def process_image_file(filepath: Path):
-        try:
-            with open(filepath, "rb") as image_file:
-                encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-                mimetype, _ = mimetypes.guess_type(filepath)
-                if mimetype in SUPPORTED_IMAGE_MIMETYPES:
-                    image_data_parts.append(
-                        {"type": "image", "data": encoded_string, "mime_type": mimetype}
-                    )
-        except OSError as e:
-            log.warning("Could not read image file %s: %s", filepath, e)
-
-    def process_zip_file(zip_path: Path):
-        try:
-            with zipfile.ZipFile(zip_path, "r") as z:
-                zip_content_parts = []
-                for filename in z.namelist():
-                    if filename.endswith("/") or Path(filename).name in {
-                        p.name for p in exclusion_paths
-                    }:
-                        continue
-                    if is_supported_text_file(Path(filename)):
-                        with z.open(filename) as f:
-                            content = f.read().decode("utf-8", errors="ignore")
-                            zip_content_parts.append(
-                                f"--- FILE (from {zip_path.name}): {filename} ---\n{content}"
-                            )
-                if zip_content_parts:
-                    attachments_dict[zip_path] = "\n\n".join(zip_content_parts)
-        except (OSError, zipfile.BadZipFile) as e:
-            log.warning("Could not process zip file %s: %s", zip_path, e)
-
-    def process_tar_file(tar_path: Path):
-        try:
-            with tarfile.open(tar_path, "r:*") as t:
-                tar_content_parts = []
-                for member in t.getmembers():
-                    if not member.isfile() or Path(member.name).name in {
-                        p.name for p in exclusion_paths
-                    }:
-                        continue
-                    if is_supported_text_file(Path(member.name)):
-                        file_obj = t.extractfile(member)
-                        if file_obj:
-                            content = file_obj.read().decode("utf-8", errors="ignore")
-                            tar_content_parts.append(
-                                f"--- FILE (from {tar_path.name}): {member.name} ---\n{content}"
-                            )
-                if tar_content_parts:
-                    attachments_dict[tar_path] = "\n\n".join(tar_content_parts)
-        except (OSError, tarfile.TarError) as e:
-            log.warning("Could not process tar file %s: %s", tar_path, e)
-
-    for p_str in paths:
-        path_obj = Path(p_str).expanduser().resolve()
-        if path_obj in exclusion_paths or not path_obj.exists():
-            continue
-        if path_obj.is_file():
-            if is_supported_archive_file(path_obj):
-                if path_obj.suffix.lower() == ".zip":
-                    process_zip_file(path_obj)
-                else:
-                    process_tar_file(path_obj)
-            elif is_supported_text_file(path_obj):
-                process_text_file(path_obj)
-            elif is_supported_image_file(path_obj):
-                process_image_file(path_obj)
-        elif path_obj.is_dir():
-            for root, dirs, files in os.walk(path_obj, topdown=True):
-                root_path = Path(root).expanduser().resolve()
-                dirs[:] = [
-                    d
-                    for d in dirs
-                    if (root_path / d).expanduser().resolve() not in exclusion_paths
-                ]
-                for name in files:
-                    file_path = (root_path / name).expanduser().resolve()
-                    if file_path in exclusion_paths:
-                        continue
-                    if is_supported_text_file(file_path):
-                        process_text_file(file_path)
-                    elif is_supported_image_file(file_path):
-                        process_image_file(file_path)
-
-    return memory_content, attachments_dict, image_data_parts
 
 
 def save_image_and_get_path(

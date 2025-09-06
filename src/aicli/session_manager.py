@@ -22,10 +22,8 @@ the state and business logic of a chat session, independent of the UI.
 from __future__ import annotations
 
 import json
-import queue
 import sys
-import threading
-from dataclasses import asdict, fields
+from dataclasses import fields
 from pathlib import Path
 
 from . import api_client, config, prompts, workflows
@@ -33,15 +31,14 @@ from . import personas as persona_manager
 from . import settings as app_settings
 from .engine import get_engine
 from .logger import log
-from .prompts import CONTINUATION_PROMPT
-from .session_state import MultiChatSessionState, SessionState
+from .managers.context_manager import ContextManager
+from .session_state import SessionState
 from .utils.config_loader import get_default_model_for_engine
-from .utils.file_processor import process_files, read_system_prompt
+from .utils.file_processor import read_system_prompt
 from .utils.formatters import (
     ASSISTANT_PROMPT,
     RESET_COLOR,
     SYSTEM_MSG,
-    clean_ai_response_text,
     format_bytes,
     format_token_string,
     sanitize_filename,
@@ -78,8 +75,10 @@ class SessionManager:
         all_files_to_process = list(files_arg or [])
         all_files_to_process.extend(persona_attachment_path_strs)
 
-        memory_content, attachments, image_data = process_files(
-            all_files_to_process, memory_enabled, exclude_arg
+        self.context_manager = ContextManager(
+            files_arg=all_files_to_process,
+            memory_enabled=memory_enabled,
+            exclude_arg=exclude_arg,
         )
 
         initial_system_prompt = None
@@ -91,14 +90,18 @@ class SessionManager:
         system_prompt_parts = []
         if initial_system_prompt:
             system_prompt_parts.append(initial_system_prompt)
-        if memory_content:
-            system_prompt_parts.append(f"--- PERSISTENT MEMORY ---\n{memory_content}")
+        if self.context_manager.memory_content:
+            system_prompt_parts.append(
+                f"--- PERSISTENT MEMORY ---\n{self.context_manager.memory_content}"
+            )
         final_system_prompt = (
             "\n\n".join(system_prompt_parts) if system_prompt_parts else None
         )
 
         persona_attachments_set = {
-            p for p in attachments if str(p) in persona_attachment_path_strs
+            p
+            for p in self.context_manager.attachments
+            if str(p) in persona_attachment_path_strs
         }
 
         self.state = SessionState(
@@ -109,9 +112,9 @@ class SessionManager:
             current_persona=persona,
             max_tokens=max_tokens,
             memory_enabled=memory_enabled,
-            attachments=attachments,
+            attachments=self.context_manager.attachments,
             persona_attachments=persona_attachments_set,
-            attached_images=image_data,
+            attached_images=self.context_manager.image_data,
             debug_active=debug_active,
             stream_active=stream_active,
         )
@@ -319,16 +322,10 @@ class SessionManager:
         workflows.inject_memory(self, fact)
 
     def _read_memory_file(self) -> str:
-        try:
-            return config.PERSISTENT_MEMORY_FILE.read_text(encoding="utf-8")
-        except (OSError, FileNotFoundError):
-            return ""
+        return self.context_manager._read_memory_file()
 
     def _write_memory_file(self, content: str) -> None:
-        try:
-            config.PERSISTENT_MEMORY_FILE.write_text(content.strip(), encoding="utf-8")
-        except OSError as e:
-            log.error("Failed to write to persistent memory file: %s", e)
+        self.context_manager._write_memory_file(content)
 
     def set_max_tokens(self, tokens: int) -> None:
         self.state.max_tokens = tokens
@@ -492,382 +489,3 @@ class SessionManager:
         ) as e:
             log.error("Error in SessionManager.load: %s", e)
             print(f"{SYSTEM_MSG}--> Error loading session: {e}{RESET_COLOR}")
-            return False
-
-    def list_personas(self) -> None:
-        personas = persona_manager.list_personas()
-        if not personas:
-            print(f"{SYSTEM_MSG}--> No personas found.{RESET_COLOR}")
-            return
-        print(f"{SYSTEM_MSG}--- Available Personas ---{RESET_COLOR}")
-        for p in personas:
-            print(f"  - {p.filename.replace('.json', '')}: {p.description}")
-
-    def refresh_files(self, search_term: str | None) -> None:
-        if not self.state.attachments:
-            print(f"{SYSTEM_MSG}--> No files attached to refresh.{RESET_COLOR}")
-            return
-
-        paths_to_refresh = [
-            p
-            for p in self.state.attachments
-            if not search_term or search_term in p.name
-        ]
-        if not paths_to_refresh:
-            print(f"{SYSTEM_MSG}--> No files matching '{search_term}'.{RESET_COLOR}")
-            return
-
-        updated, removed = [], []
-        for path in paths_to_refresh:
-            try:
-                self.state.attachments[path] = path.read_text(
-                    encoding="utf-8", errors="ignore"
-                )
-                updated.append(path.name)
-            except (OSError, FileNotFoundError):
-                removed.append(path.name)
-                del self.state.attachments[path]
-
-        if updated:
-            print(f"{SYSTEM_MSG}--> Refreshed: {', '.join(updated)}{RESET_COLOR}")
-        if removed:
-            print(
-                f"{SYSTEM_MSG}--> Removed (not found): {', '.join(removed)}{RESET_COLOR}"
-            )
-
-    def list_files(self) -> None:
-        if not self.state.attachments:
-            print(f"{SYSTEM_MSG}--> No text files are attached.{RESET_COLOR}")
-            return
-
-        file_list = sorted(
-            [
-                (p, p.stat().st_size if p.exists() else 0)
-                for p in self.state.attachments
-            ],
-            key=lambda i: i[1],
-            reverse=True,
-        )
-        print(f"{SYSTEM_MSG}--- Attached Files ---{RESET_COLOR}")
-        for path, size in file_list:
-            print(f"  - {path.name} ({format_bytes(size)})")
-
-    def attach_file(self, path_str: str) -> None:
-        path = Path(path_str).resolve()
-        if not path.exists():
-            print(f"{SYSTEM_MSG}--> Error: Path not found: {path_str}{RESET_COLOR}")
-            return
-        if path in self.state.attachments:
-            print(
-                f"{SYSTEM_MSG}--> Error: File '{path.name}' is already attached.{RESET_COLOR}"
-            )
-            return
-
-        _, new_attachments, _ = process_files([str(path)], False, [])
-        if new_attachments:
-            self.state.attachments.update(new_attachments)
-            print(f"{SYSTEM_MSG}--> Attached content from: {path.name}{RESET_COLOR}")
-        else:
-            print(
-                f"{SYSTEM_MSG}--> No readable text content found at path: {path.name}{RESET_COLOR}"
-            )
-
-    def detach_file(self, filename: str) -> None:
-        path_to_remove = next(
-            (p for p in self.state.attachments if p.name == filename), None
-        )
-        if path_to_remove:
-            del self.state.attachments[path_to_remove]
-            # Also remove from persona tracking if it was a persona file
-            self.state.persona_attachments.discard(path_to_remove)
-            print(f"{SYSTEM_MSG}--> Detached file: {path_to_remove.name}{RESET_COLOR}")
-        else:
-            print(f"{SYSTEM_MSG}--> No attached file named '{filename}'.{RESET_COLOR}")
-
-    def switch_persona(self, name: str) -> None:
-        # Remove attachments from the old persona, if any
-        for path in self.state.persona_attachments:
-            self.state.attachments.pop(path, None)
-        self.state.persona_attachments.clear()
-
-        if name.lower() == "clear":
-            if not self.state.current_persona:
-                print(f"{SYSTEM_MSG}--> No active persona to clear.{RESET_COLOR}")
-                return
-            self.state.system_prompt = self.state.initial_system_prompt
-            self.state.current_persona = None
-            print(f"{SYSTEM_MSG}--> Persona cleared.{RESET_COLOR}")
-            self.state.history.append(
-                construct_user_message(
-                    self.state.engine.name, "[SYSTEM] Persona cleared.", []
-                )
-            )
-            return
-
-        new_persona = persona_manager.load_persona(name)
-        if not new_persona:
-            print(f"{SYSTEM_MSG}--> Persona '{name}' not found.{RESET_COLOR}")
-            return
-
-        if new_persona.engine and new_persona.engine != self.state.engine.name:
-            print(
-                f"{SYSTEM_MSG}--> Switching engine to {new_persona.engine} for persona '{new_persona.name}'...{RESET_COLOR}"
-            )
-            self.switch_engine(new_persona.engine)
-
-        if new_persona.model:
-            self.state.model = new_persona.model
-        if new_persona.max_tokens is not None:
-            self.state.max_tokens = new_persona.max_tokens
-        if new_persona.stream is not None:
-            self.state.stream_active = new_persona.stream
-
-        # Add attachments from the new persona
-        if new_persona.attachments:
-            _, new_attachments, _ = process_files(
-                new_persona.attachments, use_memory=False, exclusions=[]
-            )
-            self.state.attachments.update(new_attachments)
-            self.state.persona_attachments.update(new_attachments.keys())
-            print(
-                f"{SYSTEM_MSG}--> Attached {len(new_attachments)} file(s) from persona.{RESET_COLOR}"
-            )
-
-        self.state.system_prompt = new_persona.system_prompt
-        self.state.current_persona = new_persona
-        print(f"{SYSTEM_MSG}--> Switched to persona: '{new_persona.name}'{RESET_COLOR}")
-        self.state.history.append(
-            construct_user_message(
-                self.state.engine.name,
-                f"[SYSTEM] Persona switched to '{new_persona.name}'.",
-                [],
-            )
-        )
-
-    def handle_image_command(self, args: list[str]) -> None:
-        """Delegates image command handling to the dedicated workflow."""
-        self.image_workflow.run(args)
-
-    def _get_history_for_helpers(self) -> str:
-        return "\n".join(
-            f"{msg.get('role', 'unknown')}: {extract_text_from_message(msg)}"
-            for msg in self.state.history
-        )
-
-    def _save_session_to_file(self, filename: str) -> bool:
-        safe_name = sanitize_filename(filename.rsplit(".", 1)[0]) + ".json"
-        filepath = config.SESSIONS_DIRECTORY / safe_name
-
-        state_dict = asdict(self.state)
-        state_dict["engine_name"] = self.state.engine.name
-        del state_dict["engine"]
-        state_dict["attachments"] = {
-            str(k): v for k, v in self.state.attachments.items()
-        }
-        state_dict["persona_attachments"] = [
-            str(p) for p in self.state.persona_attachments
-        ]
-        state_dict["current_persona"] = (
-            self.state.current_persona.filename if self.state.current_persona else None
-        )
-
-        try:
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(state_dict, f, indent=2)
-            print(f"{SYSTEM_MSG}--> Session saved to: {filepath}{RESET_COLOR}")
-            return True
-        except (OSError, TypeError) as e:
-            log.error("Failed to save session state: %s", e)
-            print(f"{SYSTEM_MSG}--> Error saving session: {e}{RESET_COLOR}")
-            return False
-
-    def _rename_log_file(self, old_path: Path, new_name_base: str) -> None:
-        new_path = old_path.with_name(f"{sanitize_filename(new_name_base)}.jsonl")
-        try:
-            old_path.rename(new_path)
-            print(
-                f"{SYSTEM_MSG}--> Session log renamed to: {new_path.name}{RESET_COLOR}"
-            )
-        except OSError as e:
-            log.error("Failed to rename session log: %s", e)
-
-    def _save_debug_log(self, log_filename_base: str) -> None:
-        debug_filepath = config.LOG_DIRECTORY / f"debug_{log_filename_base}.jsonl"
-        print(f"Saving debug log to: {debug_filepath}")
-        try:
-            with open(debug_filepath, "w", encoding="utf-8") as f:
-                for entry in self.state.session_raw_logs:
-                    f.write(json.dumps(entry) + "\n")
-        except OSError as e:
-            log.error("Could not save debug log file: %s", e)
-
-
-class MultiChatSession:
-    """Manages the state and logic for an interactive multi-chat session."""
-
-    def __init__(
-        self,
-        initial_state: MultiChatSessionState,
-    ):
-        self.state = initial_state
-        self.primary_engine_name = app_settings.settings["default_engine"]
-        self.engines = {
-            "openai": self.state.openai_engine,
-            "gemini": self.state.gemini_engine,
-        }
-        self.models = {
-            "openai": self.state.openai_model,
-            "gemini": self.state.gemini_model,
-        }
-        self.engine_aliases = {
-            "gpt": "openai",
-            "openai": "openai",
-            "gem": "gemini",
-            "gemini": "gemini",
-        }
-
-    def _secondary_worker(self, engine, model, history, system_prompt, result_queue):
-        srl_list = self.state.session_raw_logs if self.state.debug_active else None
-        try:
-            text, _ = api_client.perform_chat_request(
-                engine,
-                model,
-                history,
-                system_prompt,
-                self.state.max_tokens,
-                stream=True,
-                print_stream=False,
-                session_raw_logs=srl_list,
-            )
-            cleaned = clean_ai_response_text(engine.name, text)
-            result_queue.put({"engine_name": engine.name, "text": cleaned})
-        except Exception as e:
-            log.error("Secondary worker failed: %s", e)
-            result_queue.put({"engine_name": engine.name, "text": f"Error: {e}"})
-
-    def process_turn(
-        self, prompt_text: str, log_filepath: Path, is_first_turn: bool = False
-    ) -> None:
-        srl_list = self.state.session_raw_logs if self.state.debug_active else None
-        if prompt_text.lower().lstrip().startswith("/ai"):
-            parts = prompt_text.lstrip().split(" ", 2)
-            if len(parts) < 2 or parts[1].lower() not in self.engine_aliases:
-                print(f"{SYSTEM_MSG}--> Usage: /ai <gpt|gem> [prompt]{RESET_COLOR}")
-                return
-            target_engine_name = self.engine_aliases[parts[1].lower()]
-            target_prompt = parts[2] if len(parts) > 2 else CONTINUATION_PROMPT
-            user_msg_text = (
-                f"Director to {target_engine_name.capitalize()}: {target_prompt}"
-            )
-            print(f"\n{SYSTEM_MSG}{user_msg_text}{RESET_COLOR}")
-            user_msg = construct_user_message(
-                target_engine_name,
-                user_msg_text,
-                self.state.initial_image_data if is_first_turn else [],
-            )
-            current_history = translate_history(
-                self.state.shared_history + [user_msg], target_engine_name
-            )
-            engine, model = (
-                self.engines[target_engine_name],
-                self.models[target_engine_name],
-            )
-            print(
-                f"\n{ASSISTANT_PROMPT}[{engine.name.capitalize()}]: {RESET_COLOR}",
-                end="",
-                flush=True,
-            )
-            raw_response, _ = api_client.perform_chat_request(
-                engine,
-                model,
-                current_history,
-                self.state.system_prompts[target_engine_name],
-                self.state.max_tokens,
-                stream=True,
-                session_raw_logs=srl_list,
-            )
-            print()
-            cleaned = clean_ai_response_text(engine.name, raw_response)
-            asst_msg_text = f"[{engine.name.capitalize()}]: {cleaned}"
-            asst_msg = construct_assistant_message("openai", asst_msg_text)
-            self.state.shared_history.extend(
-                [construct_user_message("openai", user_msg_text, []), asst_msg]
-            )
-            self._log_multichat_turn(log_filepath, self.state.shared_history[-2:])
-        else:
-            primary_engine = self.engines[self.primary_engine_name]
-            secondary_engine = self.engines[
-                "gemini" if self.primary_engine_name == "openai" else "openai"
-            ]
-            user_msg_text = f"Director to All: {prompt_text}"
-            user_msg = construct_user_message(
-                "openai",
-                user_msg_text,
-                self.state.initial_image_data if is_first_turn else [],
-            )
-            result_queue = queue.Queue()
-            history_primary = translate_history(
-                self.state.shared_history + [user_msg], primary_engine.name
-            )
-            history_secondary = translate_history(
-                self.state.shared_history + [user_msg], secondary_engine.name
-            )
-
-            thread = threading.Thread(
-                target=self._secondary_worker,
-                args=(
-                    secondary_engine,
-                    self.models[secondary_engine.name],
-                    history_secondary,
-                    self.state.system_prompts[secondary_engine.name],
-                    result_queue,
-                ),
-            )
-            thread.start()
-
-            print(
-                f"\n{ASSISTANT_PROMPT}[{primary_engine.name.capitalize()}]: {RESET_COLOR}",
-                end="",
-                flush=True,
-            )
-            primary_raw, _ = api_client.perform_chat_request(
-                primary_engine,
-                self.models[primary_engine.name],
-                history_primary,
-                self.state.system_prompts[primary_engine.name],
-                self.state.max_tokens,
-                stream=True,
-                session_raw_logs=srl_list,
-            )
-            print("\n")
-            thread.join()
-            secondary_result = result_queue.get()
-            print(
-                f"{ASSISTANT_PROMPT}[{secondary_result['engine_name'].capitalize()}]: {RESET_COLOR}{secondary_result['text']}"
-            )
-
-            primary_cleaned = clean_ai_response_text(primary_engine.name, primary_raw)
-            primary_msg = construct_assistant_message(
-                "openai", f"[{primary_engine.name.capitalize()}]: {primary_cleaned}"
-            )
-            secondary_msg = construct_assistant_message(
-                "openai",
-                f"[{secondary_result['engine_name'].capitalize()}]: {secondary_result['text']}",
-            )
-
-            first, second = (
-                (primary_msg, secondary_msg)
-                if self.primary_engine_name == "openai"
-                else (secondary_msg, primary_msg)
-            )
-            self.state.shared_history.extend([user_msg, first, second])
-            self._log_multichat_turn(log_filepath, self.state.shared_history[-3:])
-
-    def _log_multichat_turn(
-        self, log_filepath: Path, history_slice: list[dict]
-    ) -> None:
-        try:
-            with open(log_filepath, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"history_slice": history_slice}) + "\n")
-        except OSError as e:
-            log.warning("Could not write to multi-chat session log file: %s", e)
