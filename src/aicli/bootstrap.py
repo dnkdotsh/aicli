@@ -87,6 +87,55 @@ def _copy_default_themes() -> None:
         )
 
 
+def _copy_default_docs() -> None:
+    """Copies the default documentation to the user's config directory."""
+    docs_to_copy = ["assistant_docs.md"]
+    all_copied_successfully = True
+
+    for doc_name in docs_to_copy:
+        try:
+            # Use importlib.resources to reliably find package data
+            source_file_traversable = resources.files("aicli.docs_src").joinpath(
+                doc_name
+            )
+            dest_path = config.DOCS_DIRECTORY / doc_name
+            with resources.as_file(source_file_traversable) as source_path:
+                shutil.copy2(source_path, dest_path)
+        except (FileNotFoundError, OSError) as e:
+            all_copied_successfully = False
+            log.warning(
+                "Could not find or copy documentation source file %s: %s", doc_name, e
+            )
+
+    if all_copied_successfully:
+        log.info("Copied default documentation to %s", config.DOCS_DIRECTORY)
+
+
+def _migrate_chat_logs() -> None:
+    """
+    One-time migration to move user chat logs from the old `logs` directory
+    to the new `chatlogs` directory for existing users.
+    """
+    if config.CHATLOG_DIRECTORY.exists() or not config.LOG_DIRECTORY.exists():
+        return  # Migration not needed or already done
+
+    log.info("Performing one-time migration of chat logs.")
+    print("--> Migrating existing chat logs to new `chatlogs` directory...")
+    config.CHATLOG_DIRECTORY.mkdir(exist_ok=True)
+    moved_count = 0
+    try:
+        for f in config.LOG_DIRECTORY.glob("*.jsonl"):
+            if f.name.startswith("chat_") or f.name.startswith("multichat_"):
+                shutil.move(str(f), config.CHATLOG_DIRECTORY / f.name)
+                moved_count += 1
+        if moved_count > 0:
+            log.info("Successfully migrated %d chat logs.", moved_count)
+            print(f"--> Migrated {moved_count} log files successfully.")
+    except (OSError, shutil.Error) as e:
+        log.error("Failed during chat log migration: %s", e)
+        print(f"Error during chat log migration: {e}", file=sys.stderr)
+
+
 def _perform_first_run_setup() -> None:
     """Guides the user through the initial setup process."""
     print("--- Welcome to aicli! ---")
@@ -97,9 +146,11 @@ def _perform_first_run_setup() -> None:
         config.CONFIG_DIR,
         config.DATA_DIR,
         config.LOG_DIRECTORY,
+        config.CHATLOG_DIRECTORY,
         config.IMAGE_DIRECTORY,
         config.SESSIONS_DIRECTORY,
         config.PERSONAS_DIRECTORY,
+        config.DOCS_DIRECTORY,
         USER_THEMES_DIR,
     ]
 
@@ -131,6 +182,10 @@ def _perform_first_run_setup() -> None:
         print("\n--> Copying default themes...")
         _copy_default_themes()
         print("--> Default themes copied successfully.")
+
+        print("\n--> Copying default assistant documentation...")
+        _copy_default_docs()
+        print("--> Default documentation copied successfully.")
 
         print("\n--- Setup Complete! ---")
         print(
@@ -167,9 +222,11 @@ def ensure_project_structure() -> None:
             config.CONFIG_DIR,
             config.DATA_DIR,
             config.LOG_DIRECTORY,
+            config.CHATLOG_DIRECTORY,
             config.IMAGE_DIRECTORY,
             config.SESSIONS_DIRECTORY,
             config.PERSONAS_DIRECTORY,
+            config.DOCS_DIRECTORY,
             USER_THEMES_DIR,
         ]
         try:
@@ -178,9 +235,15 @@ def ensure_project_structure() -> None:
                     log.info("Directory %s not found, creating it.", path)
                     path.mkdir(parents=True, exist_ok=True)
 
+            _migrate_chat_logs()
             persona_manager.create_default_persona_if_missing()
 
-            # Copy themes if the user's theme dir is empty, in case they deleted them
+            # Copy docs if the user's docs dir is empty
+            if not any(config.DOCS_DIRECTORY.iterdir()):
+                log.info("User docs directory is empty. Copying defaults.")
+                _copy_default_docs()
+
+            # Copy themes if the user's theme dir is empty
             if not any(USER_THEMES_DIR.iterdir()):
                 log.info("User themes directory is empty. Copying defaults.")
                 _copy_default_themes()
