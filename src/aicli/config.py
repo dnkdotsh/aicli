@@ -38,19 +38,21 @@ CONFIG_DIR = Path(platformdirs.user_config_dir(APP_NAME, APP_AUTHOR))
 DATA_DIR = Path(platformdirs.user_data_dir(APP_NAME, APP_AUTHOR))
 
 
-# --- Log and Data Directories (under DATA_DIR) ---
-LOG_DIRECTORY = DATA_DIR / "logs"
+# --- Data Directories (under DATA_DIR) ---
+LOG_DIRECTORY = DATA_DIR / "logs"  # For app logs (raw, rotating, image)
+CHATLOG_DIRECTORY = DATA_DIR / "chatlogs"  # For user-facing chat session logs
 IMAGE_DIRECTORY = DATA_DIR / "images"
 SESSIONS_DIRECTORY = DATA_DIR / "sessions"
 
 # --- Config Directories (under CONFIG_DIR) ---
 PERSONAS_DIRECTORY = CONFIG_DIR / "personas"
+DOCS_DIRECTORY = CONFIG_DIR / "docs"
 
 # --- Specific File Paths ---
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 DOTENV_FILE = CONFIG_DIR / ".env"
 IMAGE_LOG_FILE = LOG_DIRECTORY / "image_log.jsonl"
-PERSISTENT_MEMORY_FILE = LOG_DIRECTORY / "persistent_memory.txt"
+PERSISTENT_MEMORY_FILE = DATA_DIR / "persistent_memory.txt"
 RAW_LOG_FILE = LOG_DIRECTORY / "raw.log"
 ROTATING_LOG_FILE = LOG_DIRECTORY / "aicli.log"
 

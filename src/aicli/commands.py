@@ -35,7 +35,7 @@ from .logger import log
 from .settings import save_setting, settings
 
 if TYPE_CHECKING:
-    from .session_manager import MultiChatSessionState, SessionManager
+    from .session_manager import MultiChatSession, SessionManager
 
 
 # --- Single-Chat Command Handler Functions ---
@@ -268,13 +268,11 @@ def handle_image(args: list[str], session: SessionManager) -> None:
 # --- Multi-Chat Command Handler Functions ---
 
 
-def _save_multichat_session_to_file(
-    state: MultiChatSessionState, filename: str
-) -> bool:
+def _save_multichat_session_to_file(session: MultiChatSession, filename: str) -> bool:
     safe_name = utils.sanitize_filename(filename.rsplit(".", 1)[0]) + ".json"
     filepath = config.SESSIONS_DIRECTORY / safe_name
 
-    state_dict = asdict(state)
+    state_dict = asdict(session.state)
     state_dict["session_type"] = "multichat"
     # Engines are not serializable, so we remove them
     del state_dict["openai_engine"]
@@ -296,46 +294,46 @@ def _save_multichat_session_to_file(
 
 
 def handle_multichat_exit(
-    args: list[str], state: MultiChatSessionState, cli_history: InMemoryHistory
+    args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> bool:
     if args:
-        state.custom_log_rename = " ".join(args)
+        session.state.custom_log_rename = " ".join(args)
     return True
 
 
 def handle_multichat_quit(
-    args: list[str], state: MultiChatSessionState, cli_history: InMemoryHistory
+    args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> bool:
-    state.force_quit = True
+    session.state.force_quit = True
     return True
 
 
 def handle_multichat_help(
-    args: list[str], state: MultiChatSessionState, cli_history: InMemoryHistory
+    args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> None:
     utils.display_help("multichat")
 
 
 def handle_multichat_history(
-    args: list[str], state: MultiChatSessionState, cli_history: InMemoryHistory
+    args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> None:
     import json
 
-    print(json.dumps(state.shared_history, indent=2))
+    print(json.dumps(session.state.shared_history, indent=2))
 
 
 def handle_multichat_debug(
-    args: list[str], state: MultiChatSessionState, cli_history: InMemoryHistory
+    args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> None:
-    state.debug_active = not state.debug_active
-    status = "ENABLED" if state.debug_active else "DISABLED"
+    session.state.debug_active = not session.state.debug_active
+    status = "ENABLED" if session.state.debug_active else "DISABLED"
     print(
         f"{utils.SYSTEM_MSG}--> Session-specific debug logging is now {status}.{utils.RESET_COLOR}"
     )
 
 
 def handle_multichat_remember(
-    args: list[str], state: MultiChatSessionState, cli_history: InMemoryHistory
+    args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> None:
     print(
         f"{utils.SYSTEM_MSG}--> /remember is not yet implemented for multi-chat.{utils.RESET_COLOR}"
@@ -343,25 +341,25 @@ def handle_multichat_remember(
 
 
 def handle_multichat_max_tokens(
-    args: list[str], state: MultiChatSessionState, cli_history: InMemoryHistory
+    args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> None:
     if args and args[0].isdigit():
-        state.max_tokens = int(args[0])
+        session.state.max_tokens = int(args[0])
         print(
-            f"{utils.SYSTEM_MSG}--> Max tokens for this session set to: {state.max_tokens}.{utils.RESET_COLOR}"
+            f"{utils.SYSTEM_MSG}--> Max tokens for this session set to: {session.state.max_tokens}.{utils.RESET_COLOR}"
         )
     else:
         print(f"{utils.SYSTEM_MSG}--> Usage: /max-tokens <number>{utils.RESET_COLOR}")
 
 
 def handle_multichat_clear(
-    args: list[str], state: MultiChatSessionState, cli_history: InMemoryHistory
+    args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> None:
     confirm = prompt(
         "This will clear all conversation history. Type `proceed` to confirm: "
     )
     if confirm.lower() == "proceed":
-        state.shared_history.clear()
+        session.state.shared_history.clear()
         print(
             f"{utils.SYSTEM_MSG}--> Conversation history has been cleared.{utils.RESET_COLOR}"
         )
@@ -370,7 +368,7 @@ def handle_multichat_clear(
 
 
 def handle_multichat_model(
-    args: list[str], state: MultiChatSessionState, cli_history: InMemoryHistory
+    args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> None:
     if len(args) != 2:
         print(
@@ -389,32 +387,32 @@ def handle_multichat_model(
 
     target_engine = engine_map[engine_alias]
     if target_engine == "openai":
-        state.openai_model = model_name
+        session.state.openai_model = model_name
         print(
             f"{utils.SYSTEM_MSG}--> OpenAI model set to: {model_name}{utils.RESET_COLOR}"
         )
     else:  # gemini
-        state.gemini_model = model_name
+        session.state.gemini_model = model_name
         print(
             f"{utils.SYSTEM_MSG}--> Gemini model set to: {model_name}{utils.RESET_COLOR}"
         )
 
 
 def handle_multichat_state(
-    args: list[str], state: MultiChatSessionState, cli_history: InMemoryHistory
+    args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> None:
     print(f"{utils.SYSTEM_MSG}--- Multi-Chat Session State ---{utils.RESET_COLOR}")
-    print(f"  OpenAI Model: {state.openai_model}")
-    print(f"  Gemini Model: {state.gemini_model}")
-    print(f"  Max Tokens: {state.max_tokens or 'Default'}")
-    print(f"  Debug Logging: {'On' if state.debug_active else 'Off'}")
-    print(f"  System Prompts: {'Active' if state.system_prompts else 'None'}")
-    if state.initial_image_data:
-        print(f"  Attached Images: {len(state.initial_image_data)}")
+    print(f"  OpenAI Model: {session.state.openai_model}")
+    print(f"  Gemini Model: {session.state.gemini_model}")
+    print(f"  Max Tokens: {session.state.max_tokens or 'Default'}")
+    print(f"  Debug Logging: {'On' if session.state.debug_active else 'Off'}")
+    print(f"  System Prompts: {'Active' if session.state.system_prompts else 'None'}")
+    if session.state.initial_image_data:
+        print(f"  Attached Images: {len(session.state.initial_image_data)}")
 
 
 def handle_multichat_save(
-    args: list[str], state: MultiChatSessionState, cli_history: InMemoryHistory
+    args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> bool:
     should_remember, should_stay = "--remember" in args, "--stay" in args
     filename_parts = [arg for arg in args if arg not in ("--remember", "--stay")]
@@ -425,10 +423,10 @@ def handle_multichat_save(
         )
         return False
 
-    state.command_history = cli_history.get_strings()
-    if _save_multichat_session_to_file(state, filename):
+    session.state.command_history = cli_history.get_strings()
+    if _save_multichat_session_to_file(session, filename):
         if not should_remember:
-            state.exit_without_memory = True
+            session.state.exit_without_memory = True
         return not should_stay
     return False
 

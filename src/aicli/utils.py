@@ -204,7 +204,7 @@ def process_files(
         except OSError as e:
             log.warning("Could not read persistent memory file: %s", e)
 
-    exclusion_paths = {Path(p).resolve() for p in exclusions}
+    exclusion_paths = {Path(p).expanduser().resolve() for p in exclusions}
 
     def process_text_file(filepath: Path):
         try:
@@ -267,7 +267,7 @@ def process_files(
             log.warning("Could not process tar file %s: %s", tar_path, e)
 
     for p_str in paths:
-        path_obj = Path(p_str).resolve()
+        path_obj = Path(p_str).expanduser().resolve()
         if path_obj in exclusion_paths or not path_obj.exists():
             continue
         if path_obj.is_file():
@@ -282,12 +282,14 @@ def process_files(
                 process_image_file(path_obj)
         elif path_obj.is_dir():
             for root, dirs, files in os.walk(path_obj, topdown=True):
-                root_path = Path(root).resolve()
+                root_path = Path(root).expanduser().resolve()
                 dirs[:] = [
-                    d for d in dirs if (root_path / d).resolve() not in exclusion_paths
+                    d
+                    for d in dirs
+                    if (root_path / d).expanduser().resolve() not in exclusion_paths
                 ]
                 for name in files:
-                    file_path = (root_path / name).resolve()
+                    file_path = (root_path / name).expanduser().resolve()
                     if file_path in exclusion_paths:
                         continue
                     if is_supported_text_file(file_path):
@@ -542,6 +544,19 @@ def resolve_config_precedence(args: "argparse.Namespace") -> dict[str, Any]:
     if is_single_shot:
         memory_enabled_for_session = False
 
+    # 5. Combine file attachments from CLI and persona
+    files_arg = args.file or []
+    persona_attachments_arg = []
+    if persona and persona.attachments:
+        for p_str in persona.attachments:
+            # Resolve path relative to CONFIG_DIR, but allow absolute/user-expanded paths
+            path = Path(p_str)
+            if path.is_absolute() or p_str.startswith("~"):
+                resolved_path = path.expanduser().resolve()
+            else:
+                resolved_path = (config.CONFIG_DIR / path).resolve()
+            persona_attachments_arg.append(str(resolved_path))
+
     return {
         "engine_name": engine_to_use,
         "model": model_to_use,
@@ -552,7 +567,8 @@ def resolve_config_precedence(args: "argparse.Namespace") -> dict[str, Any]:
         "persona": persona,
         "session_name": args.session_name,
         "system_prompt_arg": args.system_prompt,
-        "files_arg": args.file,
+        "files_arg": files_arg,
+        "persona_attachments_arg": persona_attachments_arg,
         "exclude_arg": args.exclude,
     }
 

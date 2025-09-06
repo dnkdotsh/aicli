@@ -19,14 +19,11 @@ import sys
 from pathlib import Path
 
 from . import api_client, config, utils, workflows
+from .chat_ui import MultiChatUI, SingleChatUI
 from .engine import get_engine
 from .prompts import MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI
-from .session_manager import (
-    MultiChatManager,
-    MultiChatSessionState,
-    SessionManager,
-    SingleChatManager,
-)
+from .session_manager import MultiChatSession, SessionManager
+from .session_state import MultiChatSessionState
 from .settings import settings
 
 
@@ -52,8 +49,8 @@ def handle_chat(initial_prompt: str | None, args: argparse.Namespace) -> None:
         session.handle_single_shot(initial_prompt)
     else:
         # Interactive mode
-        chat_manager = SingleChatManager(session, config_params["session_name"])
-        chat_manager.run()
+        chat_ui = SingleChatUI(session, config_params["session_name"])
+        chat_ui.run()
 
 
 def handle_load_session(filepath_str: str) -> None:
@@ -72,8 +69,8 @@ def handle_load_session(filepath_str: str) -> None:
 
     # Use the loaded file's name as the base for the new session log
     session_name = filepath.stem
-    chat_manager = SingleChatManager(session, session_name)
-    chat_manager.run()
+    chat_ui = SingleChatUI(session, session_name)
+    chat_ui.run()
 
 
 def handle_multichat_session(
@@ -121,10 +118,9 @@ def handle_multichat_session(
         debug_active=args.debug,
     )
 
-    multi_chat_manager = MultiChatManager(
-        initial_state, args.session_name, initial_prompt
-    )
-    multi_chat_manager.run()
+    session = MultiChatSession(initial_state)
+    multi_chat_ui = MultiChatUI(session, args.session_name, initial_prompt)
+    multi_chat_ui.run()
 
 
 def handle_image_generation(prompt: str | None, args: argparse.Namespace) -> None:

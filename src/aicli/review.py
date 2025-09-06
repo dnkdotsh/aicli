@@ -268,7 +268,9 @@ def main(args: argparse.Namespace) -> None:
     while True:
         try:
             log_files = sorted(
-                config.LOG_DIRECTORY.glob("*.jsonl"), key=os.path.getmtime, reverse=True
+                config.CHATLOG_DIRECTORY.glob("*.jsonl"),
+                key=os.path.getmtime,
+                reverse=True,
             )
             session_files = sorted(
                 config.SESSIONS_DIRECTORY.glob("*.json"),
@@ -277,7 +279,7 @@ def main(args: argparse.Namespace) -> None:
             )
             all_files = session_files + log_files
             if not all_files:
-                print("No logs or saved sessions found.")
+                print("No chat logs or saved sessions found.")
                 return
 
             options = [f"Session: {f.name}" for f in session_files] + [

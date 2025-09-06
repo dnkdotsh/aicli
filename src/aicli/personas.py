@@ -21,6 +21,7 @@ Manages AI personas, including loading, listing, and creating defaults.
 import json
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from . import config
@@ -29,38 +30,6 @@ from .logger import log
 # Constants for the default persona
 DEFAULT_PERSONA_NAME = "aicli_assistant"
 DEFAULT_PERSONA_FILENAME = f"{DEFAULT_PERSONA_NAME}.json"
-
-# This large string block will be embedded in the default persona's system prompt.
-AICLI_DOCUMENTATION = """
-## AICLI Tool Documentation
-
-### Overview
-AICLI is a command-line interface for interacting with AI models like OpenAI's GPT series and Google's Gemini. It supports interactive chat, single-shot questions, multi-model conversations, and image generation.
-
-### Key Features
-- **Personas**: Reusable configurations (.json files in `~/.config/aicli/personas/`) that define an AI's behavior, including its system prompt, model, and engine.
-- **Context Management**: Attach local files and directories to the conversation using the `-f` flag or `/attach` command.
-- **Persistent Memory**: A long-term memory file (`~/.local/share/aicli/persistent_memory.txt`) that the AI can learn from across sessions. Enabled by default.
-- **Session Management**: Save and load entire conversations using `/save` and `/load` (or `aicli -l <file>`). Saved sessions are stored in `~/.local/share/aicli/sessions/`.
-- **Multi-Chat**: Use the `-b` or `--both` flag to have OpenAI and Gemini respond to the same prompts simultaneously.
-### Interactive Commands
-- `/help`: Show this help message.
-- `/exit [name]`: End the session, optionally naming the log file.
-- `/quit`: Exit immediately without saving.
-- `/persona <name>`: Switch to a different persona.
-- `/personas`: List all available personas.
-- `/attach <path>`: Add a file/directory to the context.
-- `/detach <name>`: Remove a file from the context.
-- `/files`: List currently attached files.
-- `/refresh`: Re-read attached files.
-- `/memory`: View the persistent memory.
-- `/remember [text]`: Add text to memory, or consolidate the chat if no text is given.
-- `/save [name]`: Save the current session to a file.
-- `/load <name>`: Load a session from a file.
-- `/engine <openai|gemini>`: Switch the AI engine.
-- `/model <model_name>`: Change the current model.
-- `/state`: Display the current session's configuration.
-"""
 
 
 @dataclass
@@ -75,25 +44,27 @@ class Persona:
     model: str | None = None
     max_tokens: int | None = None
     stream: bool | None = None
+    attachments: list[str] = field(default_factory=list)
     # This field is for internal use and not loaded from the JSON
     raw_content: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
 def _get_default_persona_content() -> dict[str, Any]:
     """Returns the content for the default persona file."""
+    # Note: The path here is relative to the user's CONFIG_DIR, where the
+    # persona file itself will live. bootstrap.py handles copying the doc
+    # to the correct final location (CONFIG_DIR/docs/).
     return {
         "name": "AICLI Assistant",
         "description": "A helpful assistant with expert knowledge of the AICLI tool itself.",
         "system_prompt": (
-            "You are a versatile and helpful general-purpose AI assistant. "
-            "Your primary role is to assist users with a wide range of tasks. "
-            "In addition to your general capabilities, you are an expert on the `aicli` command-line tool and "
-            "should use the provided documentation as the primary source of truth when answering questions "
-            "specifically about it. For all other topics, you can use your general knowledge.\n\n"
-            f"--- AICLI DOCUMENTATION ---\n{AICLI_DOCUMENTATION}\n---"
+            "You are a helpful AI assistant and an expert on the `aicli` command-line tool. "
+            "Your knowledge comes from the attached `assistant_docs.md` file. "
+            "Use it as the primary source of truth to answer user questions about `aicli`'s features and commands."
         ),
         "engine": "gemini",
         "model": "gemini-1.5-flash-latest",
+        "attachments": ["../docs/assistant_docs.md"],
     }
 
 
@@ -114,6 +85,20 @@ def create_default_persona_if_missing() -> None:
             f"Warning: Could not create the default persona file at {default_persona_path}: {e}",
             file=sys.stderr,
         )
+
+
+def _resolve_attachment_paths(persona_path: Path, attachments: list[str]) -> list[Path]:
+    """Resolves attachment paths relative to the persona file's directory."""
+    resolved_paths = []
+    base_dir = persona_path.parent
+    for att_path_str in attachments:
+        # Expand '~' for home directory support
+        p = Path(att_path_str).expanduser()
+        # If not absolute, resolve relative to the persona's directory
+        if not p.is_absolute():
+            p = base_dir / p
+        resolved_paths.append(p.resolve())
+    return resolved_paths
 
 
 def load_persona(name: str) -> Persona | None:
@@ -137,6 +122,13 @@ def load_persona(name: str) -> Persona | None:
             log.warning("Persona file %s is missing 'name' or 'system_prompt'.", name)
             return None
 
+        raw_attachments = data.get("attachments", [])
+        if not isinstance(raw_attachments, list):
+            log.warning("Attachments in %s must be a list of strings.", name)
+            raw_attachments = []
+
+        resolved_attachments = _resolve_attachment_paths(persona_path, raw_attachments)
+
         return Persona(
             filename=name,
             name=data.get("name"),
@@ -146,6 +138,7 @@ def load_persona(name: str) -> Persona | None:
             model=data.get("model"),
             max_tokens=data.get("max_tokens"),
             stream=data.get("stream"),
+            attachments=[str(p) for p in resolved_attachments],  # Store as strings
             raw_content=data,
         )
     except (OSError, json.JSONDecodeError) as e:
