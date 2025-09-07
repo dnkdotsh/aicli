@@ -217,14 +217,53 @@ class ContextManager:
             print(f"{SYSTEM_MSG}--> No text files are attached.{RESET_COLOR}")
             return
 
-        file_list = sorted(
-            [(p, p.stat().st_size if p.exists() else 0) for p in self.attachments],
-            key=lambda i: i[1],
-            reverse=True,
-        )
         print(f"{SYSTEM_MSG}--- Attached Files ---{RESET_COLOR}")
-        for path, size in file_list:
-            print(f"  - {path.name} ({format_bytes(size)})")
+
+        paths = sorted(self.attachments.keys(), key=lambda p: str(p).lower())
+        if not paths:
+            return
+
+        # Find the common base directory to make the tree cleaner
+        try:
+            # Use os.path.commonpath for robust handling of different path structures
+            common_path_str = os.path.commonpath([str(p) for p in paths])
+            common_base = Path(common_path_str)
+            if not common_base.is_dir():
+                common_base = common_base.parent
+        except ValueError:
+            common_base = Path("/")  # Fallback for paths on different drives (Windows)
+
+        file_tree = {}
+        for path in paths:
+            try:
+                relative_parts = path.relative_to(common_base).parts
+            except ValueError:
+                relative_parts = path.parts  # Show full path if not relative
+
+            current_level = file_tree
+            for part in relative_parts[:-1]:
+                current_level = current_level.setdefault(part, {})
+            current_level[relative_parts[-1]] = (
+                path.stat().st_size if path.exists() else 0
+            )
+
+        def _print_tree(subtree: dict, prefix: str = ""):
+            items = sorted(subtree.items())
+            for i, (name, content) in enumerate(items):
+                is_last = i == (len(items) - 1)
+                connector = "└── " if is_last else "├── "
+                print(f"{prefix}{connector}{name}", end="")
+
+                if isinstance(content, dict):
+                    print()  # It's a directory, print a newline and recurse
+                    new_prefix = prefix + ("    " if is_last else "│   ")
+                    _print_tree(content, new_prefix)
+                else:
+                    # It's a file, print the size on the same line
+                    print(f" ({format_bytes(content)})")
+
+        print(f"{common_base}/")
+        _print_tree(file_tree)
 
     def attach_file(self, path_str: str) -> None:
         path = Path(path_str).resolve()
