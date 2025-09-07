@@ -1,6 +1,6 @@
 # aicli/utils/file_processor.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 David
+# Copyright (C) 2025 Dank A. Saurus
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -136,7 +136,8 @@ def save_image_and_get_path(
     safe_prompt = sanitize_filename(prompt[:50])
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     if session_name:
-        base_filename = f"session_{session_name}_img_{safe_prompt}_{timestamp}.png"
+        safe_session_name = sanitize_filename(session_name)
+        base_filename = f"session_{safe_session_name}_img_{safe_prompt}_{timestamp}.png"
     else:
         base_filename = f"image_{safe_prompt}_{timestamp}.png"
     filepath = config.IMAGE_DIRECTORY / base_filename

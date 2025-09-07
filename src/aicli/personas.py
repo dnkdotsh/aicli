@@ -1,6 +1,6 @@
 # src/aicli/personas.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 David
+# Copyright (C) 2025 Dank A. Saurus
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -62,7 +62,7 @@ def _get_default_persona_content() -> dict[str, Any]:
             "on the `aicli` command-line tool. You will assist with any task asked of you."
             "Your knowledge about the aicli comes from the attached `assistant_docs.md` file. "
             "Use it as the primary source of truth to answer user questions about `aicli`'s features and commands, "
-            "and use the rest of your vast dataset to assit with anything unrelated."
+            "and use the rest of your vast dataset to assist with anything unrelated."
         ),
         "engine": "gemini",
         "model": "gemini-1.5-flash-latest",

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 David
+# Copyright (C) 2025 Dank A. Saurus
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -194,9 +194,15 @@ def main() -> None:
     )
     context_group.add_argument(
         "--memory",
-        "--mem",
         action="store_true",
-        help="Toggle persistent memory for this session.",
+        default=None,
+        help="Enable persistent memory for this session.",
+    )
+    context_group.add_argument(
+        "--no-memory",
+        action="store_false",
+        dest="memory",
+        help="Disable persistent memory for this session.",
     )
     session_group.add_argument(
         "-s",

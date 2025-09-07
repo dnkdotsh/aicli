@@ -1,6 +1,6 @@
 # aicli/api_client.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 David
+# Copyright (C) 2025 Dank A. Saurus
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -116,12 +116,12 @@ def make_api_request(
                 error_details = error_json["error"]["message"]
             else:
                 error_details = e.response.text
-        except requests.exceptions.JSONDecodeError:
+        except json.JSONDecodeError:
             error_details = e.response.text
         log.error("HTTP Request Error: %s\nDETAILS: %s", e, error_details)
         error_details_for_log = error_details
         raise ApiRequestError(error_details) from e
-    except requests.exceptions.JSONDecodeError as e:
+    except json.JSONDecodeError as e:
         log.error("Failed to decode API response.")
         error_details_for_log = "Failed to decode API response."
         raise ApiRequestError("Failed to decode API response.") from e

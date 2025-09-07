@@ -1,6 +1,6 @@
 # aicli/utils/config_loader.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 David
+# Copyright (C) 2025 Dank A. Saurus
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -90,10 +90,12 @@ def resolve_config_precedence(args: "argparse.Namespace") -> dict[str, Any]:
     else:
         stream_to_use = settings["stream"]
 
-    # 4. Determine memory status
-    memory_enabled_for_session = settings["memory_enabled"]
-    if hasattr(args, "memory") and args.memory:
-        memory_enabled_for_session = not memory_enabled_for_session
+    # 4. Determine memory status (CLI flag overrides default)
+    if args.memory is not None:
+        memory_enabled_for_session = args.memory
+    else:
+        memory_enabled_for_session = settings["memory_enabled"]
+
     if is_single_shot:
         memory_enabled_for_session = False
 

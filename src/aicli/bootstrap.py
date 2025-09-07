@@ -1,6 +1,6 @@
 # aicli/bootstrap.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 David
+# Copyright (C) 2025 Dank A. Saurus
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -58,10 +58,12 @@ def _create_dotenv_file(openai_key: str, gemini_key: str) -> None:
     )
     try:
         config.DOTENV_FILE.write_text(env_content, encoding="utf-8")
+        # Set secure file permissions (read/write for owner only).
+        config.DOTENV_FILE.chmod(0o600)
         log.info("Successfully created .env file at %s", config.DOTENV_FILE)
         print(f"--> API keys saved to: {config.DOTENV_FILE}")
     except OSError as e:
-        log.error("Failed to write .env file: %s", e)
+        log.error("Failed to write or set permissions on .env file: %s", e)
         print(
             f"Error: Could not write the .env file to {config.DOTENV_FILE}: {e}",
             file=sys.stderr,
