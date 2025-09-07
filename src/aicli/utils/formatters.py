@@ -1,6 +1,6 @@
 # aicli/utils/formatters.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 David
+# Copyright (C) 2025 Dank A. Saurus
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -53,19 +53,25 @@ def format_token_string(token_dict: dict[str, int]) -> str:
 def estimate_token_count(text: str) -> int:
     """
     Provides a simple, fast estimation of token count.
-    This formula is more accurate for code and structured text.
+    This formula is a rough heuristic.
     """
     if not text:
         return 0
-    word_count = len(text.split())
-    char_count_estimate = round(len(text) / 4)
-    return max(word_count, char_count_estimate)
+
+    # Heuristic: Code/structured text often has newlines. Prose usually doesn't.
+    if "\n" in text:
+        # For code, a character-based estimate is often better.
+        # A divisor of 4 is a common, effective heuristic.
+        return round(len(text) / 4)
+    else:
+        # For simple prose, word count is a more reliable estimate.
+        return len(text.split())
 
 
 def format_bytes(byte_count: int) -> str:
     """Converts a byte count to a human-readable string (KB, MB, etc.)."""
-    if byte_count is None:
-        return "0 B"
+    if byte_count is None or byte_count == 0:
+        return "0.00 B"
     power, n = 1024, 0
     power_labels = {0: "B", 1: "KB", 2: "MB", 3: "GB"}
     while byte_count >= power and n < len(power_labels) - 1:
@@ -76,7 +82,8 @@ def format_bytes(byte_count: int) -> str:
 
 def clean_ai_response_text(engine_name: str, raw_response: str) -> str:
     """Strips any self-labels the AI might have added."""
+    # This pattern matches "[TAG]", optional whitespace, an optional colon, and more optional whitespace.
     pattern = re.compile(
-        r"^\[" + re.escape(engine_name.capitalize()) + r"\]:?\s*", re.IGNORECASE
+        r"^\s*\[" + re.escape(engine_name.capitalize()) + r"\]\s*:?\s*", re.IGNORECASE
     )
     return pattern.sub("", raw_response.lstrip())
