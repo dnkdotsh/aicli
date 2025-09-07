@@ -36,7 +36,7 @@ from .utils.message_builder import (
 )
 
 if TYPE_CHECKING:
-    from .session_manager import SessionManager
+    from .managers.session_manager import SessionManager
 
 
 # --- AI Helper Workflows ---
@@ -48,12 +48,12 @@ def consolidate_memory(session: SessionManager) -> None:
         f"{SYSTEM_MSG}--> Updating persistent memory with session content...{RESET_COLOR}"
     )
     prompt_text = prompts.MEMORY_INTEGRATION_PROMPT.format(
-        existing_ltm=session._read_memory_file(),
+        existing_ltm=session.context_manager._read_memory_file(),
         session_content=session._get_history_for_helpers(),
     )
     updated_memory, _ = session._perform_helper_request(prompt_text, None)
     if updated_memory:
-        session._write_memory_file(updated_memory)
+        session.context_manager._write_memory_file(updated_memory)
         print(f"{SYSTEM_MSG}--> Persistent memory updated successfully.{RESET_COLOR}")
 
 
@@ -61,11 +61,11 @@ def inject_memory(session: SessionManager, fact: str) -> None:
     """Injects a new fact directly into persistent memory."""
     print(f"{SYSTEM_MSG}--> Injecting fact into persistent memory...{RESET_COLOR}")
     prompt_text = prompts.DIRECT_MEMORY_INJECTION_PROMPT.format(
-        existing_ltm=session._read_memory_file(), new_fact=fact
+        existing_ltm=session.context_manager._read_memory_file(), new_fact=fact
     )
     updated_memory, _ = session._perform_helper_request(prompt_text, None)
     if updated_memory:
-        session._write_memory_file(updated_memory)
+        session.context_manager._write_memory_file(updated_memory)
         print(f"{SYSTEM_MSG}--> Persistent memory updated successfully.{RESET_COLOR}")
 
 
@@ -152,13 +152,15 @@ class ImageGenerationWorkflow:
 
     def run(self, args: list[str]) -> None:
         """Main entry point for the /image command."""
+        from .commands import handle_engine
+
         if self.session.state.engine.name != "openai":
             print(
                 f"{SYSTEM_MSG}--> Image generation requires OpenAI. Temporarily switching engine...{RESET_COLOR}"
             )
             self.pre_image_engine = self.session.state.engine.name
             self.pre_image_model = self.session.state.model
-            self.session.switch_engine("openai")
+            handle_engine(["openai"], self.session)
 
         send_immediately = "--send-prompt" in args
         if send_immediately:
@@ -331,6 +333,8 @@ class ImageGenerationWorkflow:
 
     def _revert_engine_after_crafting(self) -> None:
         """Reverts to the original engine and model after an image workflow."""
+        from .commands import handle_engine, handle_model
+
         if self.pre_image_engine and self.pre_image_model:
             print(
                 f"\n{SYSTEM_MSG}--> Reverting to original session engine ({self.pre_image_engine})...{RESET_COLOR}"
@@ -341,5 +345,5 @@ class ImageGenerationWorkflow:
             self.pre_image_engine = None
             self.pre_image_model = None
 
-            self.session.switch_engine(original_engine)
-            self.session.set_model(original_model)
+            handle_engine([original_engine], self.session)
+            handle_model([original_model], self.session)

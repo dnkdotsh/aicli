@@ -87,6 +87,8 @@ def handle_chat(initial_prompt: str | None, args: argparse.Namespace) -> None:
 
 def handle_load_session(filepath_str: str) -> None:
     """Loads and starts an interactive session from a file."""
+    from .commands import handle_load
+
     raw_path = Path(filepath_str).expanduser()
     filepath = (
         raw_path if raw_path.is_absolute() else config.SESSIONS_DIRECTORY / raw_path
@@ -96,7 +98,7 @@ def handle_load_session(filepath_str: str) -> None:
 
     # Create an empty session manager, then load state into it
     session = SessionManager(engine_name=settings["default_engine"])
-    if not session.load(str(filepath)):
+    if not handle_load([str(filepath)], session):
         sys.exit(1)
 
     # Use the loaded file's name as the base for the new session log
@@ -113,7 +115,7 @@ def handle_multichat_session(
     gemini_key = api_client.check_api_keys("gemini")
 
     context = ContextManager(
-        files_arg=args.file, use_memory=False, exclude_arg=args.exclude
+        files_arg=args.file, memory_enabled=False, exclude_arg=args.exclude
     )
     attachments = context.attachments
     image_data = context.image_data
