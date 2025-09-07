@@ -27,9 +27,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from . import api_client, bootstrap, config, handlers, review, utils
+from . import api_client, bootstrap, config, handlers, review
 from . import personas as persona_manager
 from .settings import settings
+from .utils.formatters import RESET_COLOR, SYSTEM_MSG
 
 
 class CustomHelpFormatter(
@@ -100,7 +101,7 @@ def run_chat_command(args: argparse.Namespace) -> None:
 
     except api_client.MissingApiKeyError as e:
         print(
-            f"{utils.SYSTEM_MSG}Configuration Error:{utils.RESET_COLOR}",
+            f"{SYSTEM_MSG}Configuration Error:{RESET_COLOR}",
             file=sys.stderr,
         )
         print(f"  {e}", file=sys.stderr)

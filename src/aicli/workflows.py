@@ -26,8 +26,14 @@ import base64
 import sys
 from typing import TYPE_CHECKING
 
-from . import api_client, prompts, utils
+from . import api_client, prompts
 from . import settings as app_settings
+from .utils.file_processor import log_image_generation, save_image_and_get_path
+from .utils.formatters import ASSISTANT_PROMPT, RESET_COLOR, SYSTEM_MSG
+from .utils.message_builder import (
+    construct_assistant_message,
+    construct_user_message,
+)
 
 if TYPE_CHECKING:
     from .session_manager import SessionManager
@@ -39,7 +45,7 @@ if TYPE_CHECKING:
 def consolidate_memory(session: SessionManager) -> None:
     """Updates persistent memory by consolidating the current session's content."""
     print(
-        f"{utils.SYSTEM_MSG}--> Updating persistent memory with session content...{utils.RESET_COLOR}"
+        f"{SYSTEM_MSG}--> Updating persistent memory with session content...{RESET_COLOR}"
     )
     prompt_text = prompts.MEMORY_INTEGRATION_PROMPT.format(
         existing_ltm=session._read_memory_file(),
@@ -48,31 +54,25 @@ def consolidate_memory(session: SessionManager) -> None:
     updated_memory, _ = session._perform_helper_request(prompt_text, None)
     if updated_memory:
         session._write_memory_file(updated_memory)
-        print(
-            f"{utils.SYSTEM_MSG}--> Persistent memory updated successfully.{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Persistent memory updated successfully.{RESET_COLOR}")
 
 
 def inject_memory(session: SessionManager, fact: str) -> None:
     """Injects a new fact directly into persistent memory."""
-    print(
-        f"{utils.SYSTEM_MSG}--> Injecting fact into persistent memory...{utils.RESET_COLOR}"
-    )
+    print(f"{SYSTEM_MSG}--> Injecting fact into persistent memory...{RESET_COLOR}")
     prompt_text = prompts.DIRECT_MEMORY_INJECTION_PROMPT.format(
         existing_ltm=session._read_memory_file(), new_fact=fact
     )
     updated_memory, _ = session._perform_helper_request(prompt_text, None)
     if updated_memory:
         session._write_memory_file(updated_memory)
-        print(
-            f"{utils.SYSTEM_MSG}--> Persistent memory updated successfully.{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Persistent memory updated successfully.{RESET_COLOR}")
 
 
 def rename_log_with_ai(session: SessionManager, log_filepath) -> None:
     """Uses an AI helper to generate a descriptive name for a log file."""
     print(
-        f"{utils.SYSTEM_MSG}--> Generating descriptive name for session log...{utils.RESET_COLOR}"
+        f"{SYSTEM_MSG}--> Generating descriptive name for session log...{RESET_COLOR}"
     )
     prompt_text = prompts.LOG_RENAMING_PROMPT.format(
         log_content=session._get_history_for_helpers()
@@ -129,9 +129,9 @@ def _perform_image_generation(
 
     try:
         image_bytes = base64.b64decode(b64_data)
-        filepath = utils.save_image_and_get_path(prompt, image_bytes, session_name)
+        filepath = save_image_and_get_path(prompt, image_bytes, session_name)
         print(f"Image saved successfully as: {filepath}")
-        utils.log_image_generation(model, prompt, str(filepath), session_name)
+        log_image_generation(model, prompt, str(filepath), session_name)
         return True, str(filepath)
     except (base64.binascii.Error, OSError) as e:
         print(f"Error saving image: {e}", file=sys.stderr)
@@ -154,7 +154,7 @@ class ImageGenerationWorkflow:
         """Main entry point for the /image command."""
         if self.session.state.engine.name != "openai":
             print(
-                f"{utils.SYSTEM_MSG}--> Image generation requires OpenAI. Temporarily switching engine...{utils.RESET_COLOR}"
+                f"{SYSTEM_MSG}--> Image generation requires OpenAI. Temporarily switching engine...{RESET_COLOR}"
             )
             self.pre_image_engine = self.session.state.engine.name
             self.pre_image_model = self.session.state.model
@@ -168,8 +168,8 @@ class ImageGenerationWorkflow:
 
         if self.img_prompt_crafting:
             print(
-                f"{utils.SYSTEM_MSG}--> You're already in image crafting mode. "
-                f"Continue refining your prompt or type 'yes' to generate.{utils.RESET_COLOR}"
+                f"{SYSTEM_MSG}--> You're already in image crafting mode. "
+                f"Continue refining your prompt or type 'yes' to generate.{RESET_COLOR}"
             )
             return
 
@@ -181,18 +181,16 @@ class ImageGenerationWorkflow:
                 self._generate_image_from_session(prompt_to_generate)
             else:
                 print(
-                    f"{utils.SYSTEM_MSG}--> No prompt available. Use '/image <desc>' to start.{utils.RESET_COLOR}"
+                    f"{SYSTEM_MSG}--> No prompt available. Use '/image <desc>' to start.{RESET_COLOR}"
                 )
             return
 
         if prompt_from_args:
-            print(
-                f"\n{utils.SYSTEM_MSG}--> Starting image prompt crafting...{utils.RESET_COLOR}"
-            )
+            print(f"\n{SYSTEM_MSG}--> Starting image prompt crafting...{RESET_COLOR}")
             self._start_prompt_crafting(prompt_from_args)
         elif self.last_img_prompt:
             print(
-                f"\n{utils.SYSTEM_MSG}Previous prompt found: '{self.last_img_prompt}'{utils.RESET_COLOR}"
+                f"\n{SYSTEM_MSG}Previous prompt found: '{self.last_img_prompt}'{RESET_COLOR}"
             )
             choice = (
                 input("Refine, Regenerate, or start New? (r/g/n): ").lower().strip()
@@ -204,9 +202,7 @@ class ImageGenerationWorkflow:
             elif choice in ["n", "new"]:
                 self._start_prompt_crafting()
             else:
-                print(
-                    f"{utils.SYSTEM_MSG}--> Invalid choice. Cancelled.{utils.RESET_COLOR}"
-                )
+                print(f"{SYSTEM_MSG}--> Invalid choice. Cancelled.{RESET_COLOR}")
         else:
             self._start_prompt_crafting()
 
@@ -226,20 +222,20 @@ class ImageGenerationWorkflow:
             if refined_prompt and not refined_prompt.startswith("API Error:"):
                 self.img_prompt = refined_prompt.strip()
                 print(
-                    f"\n{utils.ASSISTANT_PROMPT}Image Assistant:{utils.RESET_COLOR} Here's a refined version:\n\n"
+                    f"\n{ASSISTANT_PROMPT}Image Assistant:{RESET_COLOR} Here's a refined version:\n\n"
                     f"{refined_prompt.strip()}\n\n"
                     "Type 'yes' to generate, or provide changes."
                 )
             else:
                 self.img_prompt = initial_prompt
                 print(
-                    f"\n{utils.ASSISTANT_PROMPT}Image Assistant:{utils.RESET_COLOR} Ready with prompt: {initial_prompt}\n"
+                    f"\n{ASSISTANT_PROMPT}Image Assistant:{RESET_COLOR} Ready with prompt: {initial_prompt}\n"
                     "Type 'yes' to generate, or provide changes."
                 )
         else:
             self.img_prompt = ""
             print(
-                f"\n{utils.ASSISTANT_PROMPT}Image Assistant:{utils.RESET_COLOR} Describe the image you want to create."
+                f"\n{ASSISTANT_PROMPT}Image Assistant:{RESET_COLOR} Describe the image you want to create."
             )
 
     def process_prompt_input(self, user_input: str) -> tuple[bool, str | None]:
@@ -251,14 +247,14 @@ class ImageGenerationWorkflow:
                 return True, self.img_prompt
             else:
                 print(
-                    f"{utils.SYSTEM_MSG}--> No prompt to generate. Please describe an image.{utils.RESET_COLOR}"
+                    f"{SYSTEM_MSG}--> No prompt to generate. Please describe an image.{RESET_COLOR}"
                 )
                 return False, None
 
         if normalized_input in ["no", "n", "cancel", "stop"]:
             self.img_prompt_crafting = False
             self.img_prompt = None
-            print(f"{utils.SYSTEM_MSG}--> Image crafting cancelled.{utils.RESET_COLOR}")
+            print(f"{SYSTEM_MSG}--> Image crafting cancelled.{RESET_COLOR}")
             self._revert_engine_after_crafting()
             return False, None
 
@@ -273,22 +269,20 @@ class ImageGenerationWorkflow:
         if refined_prompt and not refined_prompt.startswith("API Error:"):
             self.img_prompt = refined_prompt.strip()
             print(
-                f"\n{utils.ASSISTANT_PROMPT}Image Assistant:{utils.RESET_COLOR} Updated prompt:\n\n{refined_prompt.strip()}\n\n"
+                f"\n{ASSISTANT_PROMPT}Image Assistant:{RESET_COLOR} Updated prompt:\n\n{refined_prompt.strip()}\n\n"
                 "Type 'yes' to generate, or refine further."
             )
         else:
             self.img_prompt = user_input
             print(
-                f"\n{utils.ASSISTANT_PROMPT}Image Assistant:{utils.RESET_COLOR} Updated to: {user_input}\n"
+                f"\n{ASSISTANT_PROMPT}Image Assistant:{RESET_COLOR} Updated to: {user_input}\n"
                 "Type 'yes' to generate, or refine further."
             )
         return False, None
 
     def _generate_image_from_session(self, prompt: str) -> bool:
         """Coordinates the image generation process from an active session."""
-        print(
-            f"\n{utils.SYSTEM_MSG}--> Initiating image generation...{utils.RESET_COLOR}"
-        )
+        print(f"\n{SYSTEM_MSG}--> Initiating image generation...{RESET_COLOR}")
 
         self.last_img_prompt = prompt
         self.img_prompt = None
@@ -300,7 +294,7 @@ class ImageGenerationWorkflow:
         else:
             model_to_use = app_settings.settings["default_openai_image_model"]
             print(
-                f"{utils.SYSTEM_MSG}--> Using default image model: {model_to_use}{utils.RESET_COLOR}"
+                f"{SYSTEM_MSG}--> Using default image model: {model_to_use}{RESET_COLOR}"
             )
 
         srl = (
@@ -319,7 +313,7 @@ class ImageGenerationWorkflow:
         )
 
         if success and filepath:
-            user_msg = utils.construct_user_message(
+            user_msg = construct_user_message(
                 self.session.state.engine.name, f"Generate image: {prompt}", []
             )
             asst_msg_text = (
@@ -327,7 +321,7 @@ class ImageGenerationWorkflow:
                 f"Prompt: \"{prompt[:100]}{'...' if len(prompt) > 100 else ''}\"\n\n"
                 "Note: Generated images are not kept in the conversation context to manage token usage."
             )
-            asst_msg = utils.construct_assistant_message(
+            asst_msg = construct_assistant_message(
                 self.session.state.engine.name, asst_msg_text
             )
             self.session.state.history.extend([user_msg, asst_msg])
@@ -339,7 +333,7 @@ class ImageGenerationWorkflow:
         """Reverts to the original engine and model after an image workflow."""
         if self.pre_image_engine and self.pre_image_model:
             print(
-                f"\n{utils.SYSTEM_MSG}--> Reverting to original session engine ({self.pre_image_engine})...{utils.RESET_COLOR}"
+                f"\n{SYSTEM_MSG}--> Reverting to original session engine ({self.pre_image_engine})...{RESET_COLOR}"
             )
             original_engine = self.pre_image_engine
             original_model = self.pre_image_model

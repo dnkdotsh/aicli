@@ -1,14 +1,13 @@
-# src/aicli/review.py
+# aicli/review.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 Dank A. Saurus
+# Copyright (C) 2025 David
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 # This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY;
-# without even the implied warranty of
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 
@@ -35,7 +34,16 @@ else:
     import termios
     import tty
 
-from . import config, utils
+from . import config
+from .utils.formatters import (
+    ASSISTANT_PROMPT,
+    DIRECTOR_PROMPT,
+    RESET_COLOR,
+    SYSTEM_MSG,
+    USER_PROMPT,
+    sanitize_filename,
+)
+from .utils.message_builder import extract_text_from_message
 
 
 def get_single_char(prompt: str = "") -> str:
@@ -135,9 +143,7 @@ def get_turn_count(file_path: Path) -> int:
 
 def replay_file(file_path: Path) -> None:
     """Reads a log or session file and prints the conversation in a formatted, paged way."""
-    print(
-        f"\n{utils.SYSTEM_MSG}--- Start of replay for: {file_path.name} ---{utils.RESET_COLOR}\n"
-    )
+    print(f"\n{SYSTEM_MSG}--- Start of replay for: {file_path.name} ---{RESET_COLOR}\n")
 
     turns = []
     try:
@@ -159,34 +165,28 @@ def replay_file(file_path: Path) -> None:
 
     total_turns = len(turns)
     if total_turns == 0:
-        print(f"{utils.SYSTEM_MSG}No conversation history found.{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}No conversation history found.{RESET_COLOR}")
         return
 
     for i, turn_data in enumerate(turns):
         try:
             if "prompt" in turn_data and "response" in turn_data:
-                user_text = utils.extract_text_from_message(turn_data["prompt"])
-                asst_text = utils.extract_text_from_message(turn_data["response"])
-                print(f"{utils.USER_PROMPT}You:{utils.RESET_COLOR}\n{user_text}\n")
-                print(
-                    f"{utils.ASSISTANT_PROMPT}Assistant:{utils.RESET_COLOR}\n{asst_text}\n"
-                )
+                user_text = extract_text_from_message(turn_data["prompt"])
+                asst_text = extract_text_from_message(turn_data["response"])
+                print(f"{USER_PROMPT}You:{RESET_COLOR}\n{user_text}\n")
+                print(f"{ASSISTANT_PROMPT}Assistant:{RESET_COLOR}\n{asst_text}\n")
             elif "history_slice" in turn_data:
                 for message in turn_data.get("history_slice", []):
-                    text = utils.extract_text_from_message(message)
+                    text = extract_text_from_message(message)
                     role = "Director" if message.get("role") == "user" else "AI"
-                    color = (
-                        utils.DIRECTOR_PROMPT
-                        if role == "Director"
-                        else utils.ASSISTANT_PROMPT
-                    )
-                    print(f"{color}{role}:{utils.RESET_COLOR}\n{text}\n")
+                    color = DIRECTOR_PROMPT if role == "Director" else ASSISTANT_PROMPT
+                    print(f"{color}{role}:{RESET_COLOR}\n{text}\n")
 
             if i < total_turns - 1:
                 prompt_text = (
                     f"-- Turn {i + 1} of {total_turns} -- (Press any key, 'q' to quit)"
                 )
-                print(f"{utils.SYSTEM_MSG}{prompt_text}{utils.RESET_COLOR}", end="\r")
+                print(f"{SYSTEM_MSG}{prompt_text}{RESET_COLOR}", end="\r")
                 choice = get_single_char()
                 print(" " * (len(prompt_text) + 5), end="\r")
                 if choice.lower() == "q":
@@ -194,7 +194,7 @@ def replay_file(file_path: Path) -> None:
         except KeyboardInterrupt:
             break
 
-    print(f"\n{utils.SYSTEM_MSG}--- End of replay ---{utils.RESET_COLOR}")
+    print(f"\n{SYSTEM_MSG}--- End of replay ---{RESET_COLOR}")
 
 
 def rename_file(file_path: Path) -> Path | None:
@@ -204,7 +204,7 @@ def rename_file(file_path: Path) -> Path | None:
         if not new_base_name.strip():
             print("Rename cancelled.")
             return None
-        sanitized_name = utils.sanitize_filename(new_base_name)
+        sanitized_name = sanitize_filename(new_base_name)
         new_path = file_path.with_name(sanitized_name + file_path.suffix)
         if new_path.exists():
             print(
@@ -223,7 +223,7 @@ def rename_file(file_path: Path) -> Path | None:
 def delete_file(file_path: Path) -> bool:
     """Prompts for confirmation and deletes the given file."""
     print(
-        f"\n{utils.SYSTEM_MSG}Permanently delete '{file_path.name}'? (y/N) {utils.RESET_COLOR}",
+        f"\n{SYSTEM_MSG}Permanently delete '{file_path.name}'? (y/N) {RESET_COLOR}",
         end="",
         flush=True,
     )
@@ -243,9 +243,7 @@ def delete_file(file_path: Path) -> bool:
 
 def reenter_session(file_path: Path) -> None:
     """Launches the main aicli application to load a session."""
-    print(
-        f"\n{utils.SYSTEM_MSG}--> Re-entering session '{file_path.name}'...{utils.RESET_COLOR}"
-    )
+    print(f"\n{SYSTEM_MSG}--> Re-entering session '{file_path.name}'...{RESET_COLOR}")
     try:
         subprocess.run(["aicli", "--load", str(file_path)], check=True)
     except FileNotFoundError:
@@ -339,7 +337,7 @@ def main(args: argparse.Namespace) -> None:
                     if delete_file(selected_path):
                         break
                 else:
-                    print(f"{utils.SYSTEM_MSG}Unknown option.{utils.RESET_COLOR}")
+                    print(f"{SYSTEM_MSG}Unknown option.{RESET_COLOR}")
         except KeyboardInterrupt:
             print("\nExiting.")
             break

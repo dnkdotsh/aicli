@@ -1,6 +1,6 @@
 # aicli/commands.py
 # aicli: A command-line interface for interacting with AI models.
-# Copyright (C) 2025 Dank A. Saurus
+# Copyright (C) 2025 David
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -30,9 +30,11 @@ from prompt_toolkit import prompt
 from prompt_toolkit.application import get_app
 from prompt_toolkit.history import InMemoryHistory
 
-from . import config, theme_manager, utils
+from . import config, theme_manager
 from .logger import log
 from .settings import save_setting, settings
+from .utils.formatters import RESET_COLOR, SYSTEM_MSG, sanitize_filename
+from .utils.ui_helpers import display_help, select_model
 
 if TYPE_CHECKING:
     from .session_manager import MultiChatSession, SessionManager
@@ -53,7 +55,7 @@ def handle_quit(args: list[str], session: SessionManager) -> bool:
 
 
 def handle_help(args: list[str], session: SessionManager) -> None:
-    utils.display_help("chat")
+    display_help("chat")
 
 
 def handle_stream(args: list[str], session: SessionManager) -> None:
@@ -79,7 +81,7 @@ def handle_max_tokens(args: list[str], session: SessionManager) -> None:
     if args and args[0].isdigit():
         session.set_max_tokens(int(args[0]))
     else:
-        print(f"{utils.SYSTEM_MSG}--> Usage: /max-tokens <number>{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}--> Usage: /max-tokens <number>{RESET_COLOR}")
 
 
 def handle_clear(args: list[str], session: SessionManager) -> None:
@@ -89,14 +91,14 @@ def handle_clear(args: list[str], session: SessionManager) -> None:
     if confirm.lower() == "proceed":
         session.clear_history()
     else:
-        print(f"{utils.SYSTEM_MSG}--> Clear cancelled.{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}--> Clear cancelled.{RESET_COLOR}")
 
 
 def handle_model(args: list[str], session: SessionManager) -> None:
     if args:
         session.set_model(args[0])
     else:
-        new_model = utils.select_model(session.state.engine, "chat")
+        new_model = select_model(session.state.engine, "chat")
         session.set_model(new_model)
 
 
@@ -117,7 +119,7 @@ def handle_set(args: list[str], session: SessionManager) -> None:
     if len(args) == 2:
         key, value = args[0], args[1]
         success, message = save_setting(key, value)
-        print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}--> {message}{RESET_COLOR}")
         if success:
             session.state.ui_refresh_needed = True
             # Force a full redraw for settings that might affect the UI layout
@@ -125,13 +127,13 @@ def handle_set(args: list[str], session: SessionManager) -> None:
                 theme_manager.reload_theme()
                 get_app().invalidate()
     else:
-        print(f"{utils.SYSTEM_MSG}--> Usage: /set <key> <value>.{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}--> Usage: /set <key> <value>.{RESET_COLOR}")
 
 
 def handle_toolbar(args: list[str], session: SessionManager) -> None:
     """Handles all toolbar configuration commands."""
     if not args:
-        print(f"{utils.SYSTEM_MSG}--- Toolbar Settings ---{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}--- Toolbar Settings ---{RESET_COLOR}")
         print(f"  Toolbar Enabled: {settings['toolbar_enabled']}")
         print(f"  Component Order: {settings['toolbar_priority_order']}")
         print(f"  Separator: '{settings['toolbar_separator']}'")
@@ -151,7 +153,7 @@ def handle_toolbar(args: list[str], session: SessionManager) -> None:
 
     if command in ["on", "off"]:
         success, message = save_setting("toolbar_enabled", command)
-        print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}--> {message}{RESET_COLOR}")
         if success:
             session.state.ui_refresh_needed = True
             get_app().invalidate()
@@ -161,24 +163,24 @@ def handle_toolbar(args: list[str], session: SessionManager) -> None:
             setting_key = valid_components[component_key]
             current_value = settings[setting_key]
             success, message = save_setting(setting_key, str(not current_value))
-            print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
+            print(f"{SYSTEM_MSG}--> {message}{RESET_COLOR}")
             if success:
                 session.state.ui_refresh_needed = True
                 get_app().invalidate()
         else:
             print(
-                f"{utils.SYSTEM_MSG}--> Unknown component '{component_key}'. Valid components: {list(valid_components.keys())}{utils.RESET_COLOR}"
+                f"{SYSTEM_MSG}--> Unknown component '{component_key}'. Valid components: {list(valid_components.keys())}{RESET_COLOR}"
             )
     else:
         print(
-            f"{utils.SYSTEM_MSG}--> Usage: /toolbar [on|off|toggle <component>]{utils.RESET_COLOR}"
+            f"{SYSTEM_MSG}--> Usage: /toolbar [on|off|toggle <component>]{RESET_COLOR}"
         )
 
 
 def handle_theme(args: list[str], session: SessionManager) -> None:
     """Handles listing and applying themes."""
     if not args:
-        print(f"{utils.SYSTEM_MSG}--- Available Themes ---{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}--- Available Themes ---{RESET_COLOR}")
         current_theme_name = settings.get("active_theme", "default")
         for name, desc in theme_manager.list_themes().items():
             prefix = " >" if name == current_theme_name else "  "
@@ -187,9 +189,7 @@ def handle_theme(args: list[str], session: SessionManager) -> None:
 
     theme_name = args[0].lower()
     if theme_name not in theme_manager.list_themes():
-        print(
-            f"{utils.SYSTEM_MSG}--> Theme '{theme_name}' not found.{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Theme '{theme_name}' not found.{RESET_COLOR}")
         return
 
     success, message = save_setting("active_theme", theme_name)
@@ -197,11 +197,9 @@ def handle_theme(args: list[str], session: SessionManager) -> None:
         theme_manager.reload_theme()
         session.state.ui_refresh_needed = True
         get_app().invalidate()
-        print(f"{utils.SYSTEM_MSG}--> {message}{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}--> {message}{RESET_COLOR}")
     else:
-        print(
-            f"{utils.SYSTEM_MSG}--> Error setting theme: {message}{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Error setting theme: {message}{RESET_COLOR}")
 
 
 def handle_save(
@@ -214,7 +212,7 @@ def handle_load(args: list[str], session: SessionManager) -> None:
     if args:
         session.load(" ".join(args))
     else:
-        print(f"{utils.SYSTEM_MSG}--> Usage: /load <filename>{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}--> Usage: /load <filename>{RESET_COLOR}")
 
 
 def handle_refresh(args: list[str], session: SessionManager) -> None:
@@ -227,16 +225,14 @@ def handle_files(args: list[str], session: SessionManager) -> None:
 
 def handle_attach(args: list[str], session: SessionManager) -> None:
     if not args:
-        print(
-            f"{utils.SYSTEM_MSG}--> Usage: /attach <path_to_file_or_dir>{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Usage: /attach <path_to_file_or_dir>{RESET_COLOR}")
         return
     session.attach_file(" ".join(args))
 
 
 def handle_detach(args: list[str], session: SessionManager) -> None:
     if not args:
-        print(f"{utils.SYSTEM_MSG}--> Usage: /detach <filename>{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}--> Usage: /detach <filename>{RESET_COLOR}")
         return
     session.detach_file(" ".join(args))
 
@@ -247,9 +243,7 @@ def handle_personas(args: list[str], session: SessionManager) -> None:
 
 def handle_persona(args: list[str], session: SessionManager) -> None:
     if not args:
-        print(
-            f"{utils.SYSTEM_MSG}--> Usage: /persona <name> OR /persona clear{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Usage: /persona <name> OR /persona clear{RESET_COLOR}")
         return
     session.switch_persona(" ".join(args))
 
@@ -269,7 +263,7 @@ def handle_image(args: list[str], session: SessionManager) -> None:
 
 
 def _save_multichat_session_to_file(session: MultiChatSession, filename: str) -> bool:
-    safe_name = utils.sanitize_filename(filename.rsplit(".", 1)[0]) + ".json"
+    safe_name = sanitize_filename(filename.rsplit(".", 1)[0]) + ".json"
     filepath = config.SESSIONS_DIRECTORY / safe_name
 
     state_dict = asdict(session.state)
@@ -281,15 +275,11 @@ def _save_multichat_session_to_file(session: MultiChatSession, filename: str) ->
     try:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(state_dict, f, indent=2)
-        print(
-            f"{utils.SYSTEM_MSG}--> Multi-chat session saved to: {filepath}{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Multi-chat session saved to: {filepath}{RESET_COLOR}")
         return True
     except (OSError, TypeError) as e:
         log.error("Failed to save multi-chat session state: %s", e)
-        print(
-            f"{utils.SYSTEM_MSG}--> Error saving multi-chat session: {e}{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Error saving multi-chat session: {e}{RESET_COLOR}")
         return False
 
 
@@ -311,7 +301,7 @@ def handle_multichat_quit(
 def handle_multichat_help(
     args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> None:
-    utils.display_help("multichat")
+    display_help("multichat")
 
 
 def handle_multichat_history(
@@ -328,7 +318,7 @@ def handle_multichat_debug(
     session.state.debug_active = not session.state.debug_active
     status = "ENABLED" if session.state.debug_active else "DISABLED"
     print(
-        f"{utils.SYSTEM_MSG}--> Session-specific debug logging is now {status}.{utils.RESET_COLOR}"
+        f"{SYSTEM_MSG}--> Session-specific debug logging is now {status}.{RESET_COLOR}"
     )
 
 
@@ -336,7 +326,7 @@ def handle_multichat_remember(
     args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> None:
     print(
-        f"{utils.SYSTEM_MSG}--> /remember is not yet implemented for multi-chat.{utils.RESET_COLOR}"
+        f"{SYSTEM_MSG}--> /remember is not yet implemented for multi-chat.{RESET_COLOR}"
     )
 
 
@@ -346,10 +336,10 @@ def handle_multichat_max_tokens(
     if args and args[0].isdigit():
         session.state.max_tokens = int(args[0])
         print(
-            f"{utils.SYSTEM_MSG}--> Max tokens for this session set to: {session.state.max_tokens}.{utils.RESET_COLOR}"
+            f"{SYSTEM_MSG}--> Max tokens for this session set to: {session.state.max_tokens}.{RESET_COLOR}"
         )
     else:
-        print(f"{utils.SYSTEM_MSG}--> Usage: /max-tokens <number>{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}--> Usage: /max-tokens <number>{RESET_COLOR}")
 
 
 def handle_multichat_clear(
@@ -360,48 +350,38 @@ def handle_multichat_clear(
     )
     if confirm.lower() == "proceed":
         session.state.shared_history.clear()
-        print(
-            f"{utils.SYSTEM_MSG}--> Conversation history has been cleared.{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Conversation history has been cleared.{RESET_COLOR}")
     else:
-        print(f"{utils.SYSTEM_MSG}--> Clear cancelled.{utils.RESET_COLOR}")
+        print(f"{SYSTEM_MSG}--> Clear cancelled.{RESET_COLOR}")
 
 
 def handle_multichat_model(
     args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> None:
     if len(args) != 2:
-        print(
-            f"{utils.SYSTEM_MSG}--> Usage: /model <gpt|gem> <model_name>{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Usage: /model <gpt|gem> <model_name>{RESET_COLOR}")
         return
 
     engine_alias, model_name = args[0].lower(), args[1]
     engine_map = {"gpt": "openai", "gem": "gemini"}
 
     if engine_alias not in engine_map:
-        print(
-            f"{utils.SYSTEM_MSG}--> Invalid engine alias. Use 'gpt' or 'gem'.{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Invalid engine alias. Use 'gpt' or 'gem'.{RESET_COLOR}")
         return
 
     target_engine = engine_map[engine_alias]
     if target_engine == "openai":
         session.state.openai_model = model_name
-        print(
-            f"{utils.SYSTEM_MSG}--> OpenAI model set to: {model_name}{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> OpenAI model set to: {model_name}{RESET_COLOR}")
     else:  # gemini
         session.state.gemini_model = model_name
-        print(
-            f"{utils.SYSTEM_MSG}--> Gemini model set to: {model_name}{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Gemini model set to: {model_name}{RESET_COLOR}")
 
 
 def handle_multichat_state(
     args: list[str], session: MultiChatSession, cli_history: InMemoryHistory
 ) -> None:
-    print(f"{utils.SYSTEM_MSG}--- Multi-Chat Session State ---{utils.RESET_COLOR}")
+    print(f"{SYSTEM_MSG}--- Multi-Chat Session State ---{RESET_COLOR}")
     print(f"  OpenAI Model: {session.state.openai_model}")
     print(f"  Gemini Model: {session.state.gemini_model}")
     print(f"  Max Tokens: {session.state.max_tokens or 'Default'}")
@@ -419,7 +399,7 @@ def handle_multichat_save(
     filename = " ".join(filename_parts)
     if not filename:
         print(
-            f"{utils.SYSTEM_MSG}--> Usage: /save <filename> [--stay] [--remember]{utils.RESET_COLOR}"
+            f"{SYSTEM_MSG}--> Usage: /save <filename> [--stay] [--remember]{RESET_COLOR}"
         )
         return False
 

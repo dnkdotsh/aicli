@@ -35,10 +35,20 @@ from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.styles import Style
 
-from . import commands, config, theme_manager, utils
+from . import commands, config, theme_manager
 from . import settings as app_settings
 from .logger import log
-from .session_manager import MultiChatSession, SessionManager
+from .managers.multichat_manager import MultiChatSession
+from .managers.session_manager import SessionManager
+from .utils.formatters import (
+    DIRECTOR_PROMPT,
+    RESET_COLOR,
+    SYSTEM_MSG,
+    USER_PROMPT,
+    estimate_token_count,
+    format_token_string,
+)
+from .utils.message_builder import extract_text_from_message
 
 
 class SingleChatUI:
@@ -83,7 +93,7 @@ class SingleChatUI:
             )
         except (ValueError, TypeError) as e:
             print(
-                f"{utils.SYSTEM_MSG}--> Warning: Invalid theme style format detected: {e}{utils.RESET_COLOR}"
+                f"{SYSTEM_MSG}--> Warning: Invalid theme style format detected: {e}{RESET_COLOR}"
             )
             log.warning("Invalid theme style format: %s", e)
             return Style.from_dict({})
@@ -94,14 +104,14 @@ class SingleChatUI:
         base_context_tokens = 0
         full_system_prompt = self.session._assemble_full_system_prompt()
         if full_system_prompt:
-            base_context_tokens += utils.estimate_token_count(full_system_prompt)
+            base_context_tokens += estimate_token_count(full_system_prompt)
 
         for message in self.session.state.history:
-            text_content = utils.extract_text_from_message(message)
-            base_context_tokens += utils.estimate_token_count(text_content)
+            text_content = extract_text_from_message(message)
+            base_context_tokens += estimate_token_count(text_content)
 
         live_buffer_text = get_app().current_buffer.text
-        live_buffer_tokens = utils.estimate_token_count(live_buffer_text)
+        live_buffer_tokens = estimate_token_count(live_buffer_text)
         total_live_tokens = base_context_tokens + live_buffer_tokens
 
         # --- Component Mapping ---
@@ -109,7 +119,7 @@ class SingleChatUI:
             "tokens": (
                 True,
                 "class:bottom-toolbar.tokens",
-                utils.format_token_string(self.session.state.last_turn_tokens),
+                format_token_string(self.session.state.last_turn_tokens),
             ),
             "io": (
                 app_settings.settings["toolbar_show_total_io"],
@@ -190,7 +200,7 @@ class SingleChatUI:
                     if app_settings.settings["toolbar_enabled"]
                     else None
                 )
-                prompt_message = f"\n{utils.USER_PROMPT}You: {utils.RESET_COLOR}"
+                prompt_message = f"\n{USER_PROMPT}You: {RESET_COLOR}"
                 user_input = prompt_session.prompt(
                     ANSI(prompt_message),
                     bottom_toolbar=toolbar_content,
@@ -238,7 +248,7 @@ class SingleChatUI:
             result = handler(args, self.session)
             return result if isinstance(result, bool) else False
         print(
-            f"{utils.SYSTEM_MSG}--> Unknown command: {command_str}. Type /help.{utils.RESET_COLOR}"
+            f"{SYSTEM_MSG}--> Unknown command: {command_str}. Type /help.{RESET_COLOR}"
         )
         return False
 
@@ -289,9 +299,7 @@ class MultiChatUI:
 
         try:
             while True:
-                prompt_message = (
-                    f"\n{utils.DIRECTOR_PROMPT}Director> {utils.RESET_COLOR}"
-                )
+                prompt_message = f"\n{DIRECTOR_PROMPT}Director> {RESET_COLOR}"
                 user_input = prompt(ANSI(prompt_message), history=cli_history).strip()
                 if not user_input:
                     sys.stdout.write("\x1b[1A\x1b[2K")
@@ -323,7 +331,5 @@ class MultiChatUI:
         handler = commands.MULTICHAT_COMMAND_MAP.get(command_str)
         if handler:
             return handler(args, self.session, cli_history) or False
-        print(
-            f"{utils.SYSTEM_MSG}--> Unknown command: {command_str}.{utils.RESET_COLOR}"
-        )
+        print(f"{SYSTEM_MSG}--> Unknown command: {command_str}.{RESET_COLOR}")
         return False
