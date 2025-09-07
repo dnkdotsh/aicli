@@ -181,17 +181,17 @@ class ContextManager:
                 elif is_supported_image_file(file_path):
                     self._process_image_file(file_path)
 
-    def refresh_files(self, search_term: str | None) -> None:
+    def refresh_files(self, search_term: str | None) -> list[str]:
         if not self.attachments:
             print(f"{SYSTEM_MSG}--> No files attached to refresh.{RESET_COLOR}")
-            return
+            return []
 
         paths_to_refresh = [
             p for p in self.attachments if not search_term or search_term in p.name
         ]
         if not paths_to_refresh:
             print(f"{SYSTEM_MSG}--> No files matching '{search_term}'.{RESET_COLOR}")
-            return
+            return []
 
         updated, removed = [], []
         for path in paths_to_refresh:
@@ -210,6 +210,7 @@ class ContextManager:
             print(
                 f"{SYSTEM_MSG}--> Removed (not found): {', '.join(removed)}{RESET_COLOR}"
             )
+        return updated
 
     def list_files(self) -> None:
         if not self.attachments:

@@ -9,7 +9,7 @@ import logging
 import pytest
 from aicli import config  # Import config to access LOG_DIRECTORY
 from aicli.engine import GeminiEngine, OpenAIEngine
-from aicli.session_manager import SessionState
+from aicli.managers.session_manager import SessionState
 from pyfakefs.fake_filesystem_unittest import Patcher
 
 

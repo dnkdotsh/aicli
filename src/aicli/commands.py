@@ -415,8 +415,18 @@ def handle_load(args: list[str], session: SessionManager) -> bool:
 
 
 def handle_refresh(args: list[str], session: SessionManager) -> None:
-    session.context_manager.refresh_files(" ".join(args) if args else None)
+    updated_files = session.context_manager.refresh_files(
+        " ".join(args) if args else None
+    )
     session.state.attachments = session.context_manager.attachments
+
+    if updated_files:
+        filenames = ", ".join(f"'{f}'" for f in updated_files)
+        system_message_text = f"[SYSTEM] The content of the following files has been refreshed: {filenames}."
+        system_message = construct_user_message(
+            session.state.engine.name, system_message_text, []
+        )
+        session.state.history.append(system_message)
 
 
 def handle_files(args: list[str], session: SessionManager) -> None:
@@ -427,8 +437,21 @@ def handle_attach(args: list[str], session: SessionManager) -> None:
     if not args:
         print(f"{SYSTEM_MSG}--> Usage: /attach <path_to_file_or_dir>{RESET_COLOR}")
         return
-    session.context_manager.attach_file(" ".join(args))
+    path_str = " ".join(args)
+
+    before_paths = set(session.state.attachments.keys())
+    session.context_manager.attach_file(path_str)
     session.state.attachments = session.context_manager.attachments
+    after_paths = set(session.state.attachments.keys())
+
+    newly_attached_paths = after_paths - before_paths
+    if newly_attached_paths:
+        path_names = ", ".join(f"'{p.name}'" for p in newly_attached_paths)
+        system_message_text = f"[SYSTEM] The following content has been attached to the context: {path_names}."
+        system_message = construct_user_message(
+            session.state.engine.name, system_message_text, []
+        )
+        session.state.history.append(system_message)
 
 
 def handle_detach(args: list[str], session: SessionManager) -> None:
@@ -446,6 +469,14 @@ def handle_detach(args: list[str], session: SessionManager) -> None:
         # Also remove from persona tracking if it was a persona file
         session.state.persona_attachments.discard(path_to_remove)
         session.state.attachments = session.context_manager.attachments
+
+        system_message_text = (
+            f"[SYSTEM] The file '{filename}' has been detached from the context."
+        )
+        system_message = construct_user_message(
+            session.state.engine.name, system_message_text, []
+        )
+        session.state.history.append(system_message)
     else:
         print(f"{SYSTEM_MSG}--> No attached file named '{filename}'.{RESET_COLOR}")
 
