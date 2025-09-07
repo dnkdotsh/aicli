@@ -25,7 +25,7 @@ from .managers.context_manager import ContextManager
 from .managers.multichat_manager import MultiChatSession
 from .managers.session_manager import SessionManager
 from .prompts import MULTICHAT_SYSTEM_PROMPT_GEMINI, MULTICHAT_SYSTEM_PROMPT_OPENAI
-from .session_state import MultiChatSessionState
+from .session_state import MultiChatSessionState, SessionState
 from .settings import settings
 from .utils.config_loader import resolve_config_precedence
 from .utils.file_processor import read_system_prompt
@@ -35,20 +35,69 @@ from .utils.ui_helpers import select_model
 
 def handle_chat(initial_prompt: str | None, args: argparse.Namespace) -> None:
     """Handles both single-shot and interactive chat sessions."""
+    # --- Phase 4: Centralized Session Setup ---
+    # 1. Resolve all configuration from CLI, persona, and settings
     config_params = resolve_config_precedence(args)
+    p = config_params  # Alias for brevity
 
-    session = SessionManager(
-        engine_name=config_params["engine_name"],
-        model=config_params["model"],
-        max_tokens=config_params["max_tokens"],
-        stream_active=config_params["stream"],
-        memory_enabled=config_params["memory_enabled"],
-        debug_active=config_params["debug_enabled"],
-        persona=config_params["persona"],
-        system_prompt_arg=config_params["system_prompt_arg"],
-        files_arg=config_params["files_arg"],
-        exclude_arg=config_params["exclude_arg"],
+    # 2. Prepare engine and context
+    api_key = api_client.check_api_keys(p["engine_name"])
+    engine_instance = get_engine(p["engine_name"], api_key)
+
+    persona_attachment_path_strs = set(p["persona"].attachments if p["persona"] else [])
+    all_files_to_process = list(p["files_arg"] or [])
+    all_files_to_process.extend(persona_attachment_path_strs)
+
+    context_manager = ContextManager(
+        files_arg=all_files_to_process,
+        memory_enabled=p["memory_enabled"],
+        exclude_arg=p["exclude_arg"],
     )
+
+    # 3. Assemble the system prompt
+    initial_system_prompt = None
+    if p["system_prompt_arg"]:
+        initial_system_prompt = read_system_prompt(p["system_prompt_arg"])
+    elif p["persona"] and p["persona"].system_prompt:
+        initial_system_prompt = p["persona"].system_prompt
+
+    system_prompt_parts = []
+    if initial_system_prompt:
+        system_prompt_parts.append(initial_system_prompt)
+    if context_manager.memory_content:
+        system_prompt_parts.append(
+            f"--- PERSISTENT MEMORY ---\n{context_manager.memory_content}"
+        )
+    final_system_prompt = (
+        "\n\n".join(system_prompt_parts) if system_prompt_parts else None
+    )
+
+    persona_attachments_set = {
+        path
+        for path in context_manager.attachments
+        if str(path) in persona_attachment_path_strs
+    }
+
+    # 4. Create the complete SessionState object
+    state = SessionState(
+        engine=engine_instance,
+        model=p["model"],
+        system_prompt=final_system_prompt,
+        initial_system_prompt=initial_system_prompt,
+        current_persona=p["persona"],
+        max_tokens=p["max_tokens"],
+        memory_enabled=p["memory_enabled"],
+        attachments=context_manager.attachments,
+        persona_attachments=persona_attachments_set,
+        attached_images=context_manager.image_data,
+        debug_active=p["debug_enabled"],
+        stream_active=p["stream"],
+    )
+
+    # 5. Finally, instantiate the SessionManager with the pre-built state
+    session = SessionManager(state=state, context_manager=context_manager)
+
+    # --- End of Centralized Setup ---
 
     # Check for large context size and warn the user.
     total_attachment_bytes = sum(
@@ -81,7 +130,7 @@ def handle_chat(initial_prompt: str | None, args: argparse.Namespace) -> None:
         session.handle_single_shot(initial_prompt)
     else:
         # Interactive mode
-        chat_ui = SingleChatUI(session, config_params["session_name"])
+        chat_ui = SingleChatUI(session, p["session_name"])
         chat_ui.run()
 
 
@@ -96,8 +145,27 @@ def handle_load_session(filepath_str: str) -> None:
     if filepath.suffix != ".json":
         filepath = filepath.with_suffix(".json")
 
-    # Create an empty session manager, then load state into it
-    session = SessionManager(engine_name=settings["default_engine"])
+    # The new SessionManager constructor requires pre-built state.
+    # We create a temporary, minimal manager to pass to handle_load.
+    # handle_load will then replace its `state` object entirely.
+    temp_engine = get_engine(
+        settings["default_engine"],
+        api_client.check_api_keys(settings["default_engine"]),
+    )
+    temp_state = SessionState(
+        engine=temp_engine,
+        model=settings["default_gemini_model"],
+        system_prompt=None,
+        initial_system_prompt=None,
+        current_persona=None,
+        max_tokens=None,
+        memory_enabled=False,
+    )
+    temp_context = ContextManager(
+        files_arg=None, memory_enabled=False, exclude_arg=None
+    )
+    session = SessionManager(state=temp_state, context_manager=temp_context)
+
     if not handle_load([str(filepath)], session):
         sys.exit(1)
 
